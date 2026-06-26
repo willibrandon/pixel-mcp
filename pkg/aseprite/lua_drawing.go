@@ -61,8 +61,20 @@ end
 
 app.transaction(function()
 	local cel = layer:cel(frame)
-	if not cel then
-		cel = spr:newCel(layer, frame)
+	if cel and cel.image then
+		-- Composite existing content into a full-canvas image at (0,0) so that
+		-- sprite coordinates match image coordinates for putPixel below. Without
+		-- this, Image:putPixel uses cel-local coordinates and pixels are offset
+		-- by the cel's position whenever content does not start at (0,0).
+		local full = Image(spr.width, spr.height, spr.colorMode)
+		full:drawImage(cel.image, cel.position)
+		cel.image = full
+		cel.position = Point(0, 0)
+	else
+		-- No cel yet (or nil image, e.g. a freshly added layer): create a
+		-- full-canvas cel WITH an image so putPixel has a valid target.
+		local full = Image(spr.width, spr.height, spr.colorMode)
+		cel = spr:newCel(layer, frame, full, Point(0, 0))
 	end
 
 	local img = cel.image

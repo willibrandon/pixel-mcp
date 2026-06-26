@@ -168,6 +168,33 @@ func TestLuaGenerator_DrawPixels(t *testing.T) {
 	}
 }
 
+// TestLuaGenerator_DrawPixels_NormalizesCel verifies the generated script
+// normalizes the target cel to a full-canvas image at (0,0) before writing.
+//
+// Image:putPixel uses cel-LOCAL coordinates, so the script must guarantee the
+// cel covers the whole sprite at origin (0,0); otherwise pixels are offset by
+// the cel's position whenever the layer's content does not start at (0,0)
+// (e.g. after a shape tool trims the cel). This is a pure string check so it
+// runs without Aseprite — guarding the fix in CI, where the integration tests
+// (which require a real Aseprite install) do not run.
+func TestLuaGenerator_DrawPixels_NormalizesCel(t *testing.T) {
+	gen := NewLuaGenerator()
+	pixels := []Pixel{{Point: Point{X: 3, Y: 4}, Color: Color{R: 1, G: 2, B: 3, A: 255}}}
+	script := gen.DrawPixels("Layer 1", 1, pixels, false)
+
+	wants := []string{
+		"Image(spr.width, spr.height, spr.colorMode)", // full-canvas image
+		"full:drawImage(cel.image, cel.position)",     // preserve existing content
+		"cel.position = Point(0, 0)",                   // reposition existing cel to origin
+		"spr:newCel(layer, frame, full, Point(0, 0))", // new cel carries a full-canvas image
+	}
+	for _, w := range wants {
+		if !strings.Contains(script, w) {
+			t.Errorf("generated script missing %q; cel is not normalized to full-canvas at (0,0)", w)
+		}
+	}
+}
+
 func TestLuaGenerator_ExportSprite(t *testing.T) {
 	gen := NewLuaGenerator()
 
