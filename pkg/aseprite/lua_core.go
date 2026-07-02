@@ -54,29 +54,36 @@ func FormatColor(c Color) string {
 
 // FormatColorWithPalette formats a Color with optional palette snapping for img:putPixel.
 //
-// If usePalette is false, returns a direct Color constructor call.
-// If usePalette is true, wraps the color in snapToPaletteForPixel() to find the nearest palette color.
+// If usePalette is false, wraps the color in resolveExactPaletteColor() to require an exact
+// palette match on indexed sprites (errors otherwise) while passing RGB/grayscale colors through
+// unchanged. If usePalette is true, wraps the color in snapToPaletteForPixel() to find the
+// nearest palette color.
 //
-// The snapToPaletteForPixel function must be defined in the script (use GeneratePaletteSnapperHelper).
-// This is useful for palette-constrained pixel art to ensure all colors match the palette.
-// Returns palette index in indexed mode, pixel color in other modes.
+// The resolveExactPaletteColor function must be defined in the script when usePalette is false
+// (use ResolveExactPaletteColorHelper); snapToPaletteForPixel must be defined when usePalette is
+// true (use GeneratePaletteSnapperHelper). Returns palette index in indexed mode, pixel color in
+// other modes.
 func FormatColorWithPalette(c Color, usePalette bool) string {
 	if !usePalette {
-		return FormatColor(c)
+		return fmt.Sprintf("resolveExactPaletteColor(%d, %d, %d, %d)", c.R, c.G, c.B, c.A)
 	}
 	return fmt.Sprintf("snapToPaletteForPixel(%d, %d, %d, %d)", c.R, c.G, c.B, c.A)
 }
 
 // FormatColorWithPaletteForTool formats a Color with optional palette snapping for app.useTool.
 //
-// If usePalette is false, returns a direct Color constructor call.
-// If usePalette is true, wraps the color in snapToPaletteForTool() to find the nearest palette color.
+// If usePalette is false, wraps the color in resolveExactPaletteColor() to require an exact
+// palette match on indexed sprites (errors otherwise) while passing RGB/grayscale colors through
+// unchanged. If usePalette is true, wraps the color in snapToPaletteForTool() to find the nearest
+// palette color.
 //
-// The snapToPaletteForTool function must be defined in the script (use GeneratePaletteSnapperHelper).
-// Always returns a pixel color value suitable for app.useTool in all color modes.
+// The resolveExactPaletteColor function must be defined in the script when usePalette is false
+// (use ResolveExactPaletteColorHelper); snapToPaletteForTool must be defined when usePalette is
+// true (use GeneratePaletteSnapperHelper). Always returns a value suitable for app.useTool's
+// color field in all color modes.
 func FormatColorWithPaletteForTool(c Color, usePalette bool) string {
 	if !usePalette {
-		return FormatColor(c)
+		return fmt.Sprintf("resolveExactPaletteColor(%d, %d, %d, %d)", c.R, c.G, c.B, c.A)
 	}
 	return fmt.Sprintf("snapToPaletteForTool(%d, %d, %d, %d)", c.R, c.G, c.B, c.A)
 }
@@ -155,6 +162,59 @@ end
 -- Default snapToPalette for backwards compatibility (uses ForPixel variant)
 local function snapToPalette(r, g, b, a)
 	return snapToPaletteForPixel(r, g, b, a)
+end
+`
+}
+
+// ResolveExactPaletteColorHelper returns Lua code defining resolveExactPaletteColor,
+// a color-resolution helper for img:putPixel and app.useTool calls made with
+// usePalette=false (exact colors, no nearest-match snapping).
+//
+// On an indexed sprite, both img:putPixel and app.useTool expect a palette
+// index, not an arbitrary RGBA value. Passing a Color object directly works
+// when the sprite's palette was set earlier in the SAME Aseprite process, but
+// pixel-mcp runs each tool call as its own aseprite --batch invocation: the
+// palette is set in one process and the drawing happens in the next. In that
+// cross-process scenario, Aseprite's own Color-to-index resolution for
+// img:putPixel/app.useTool does not reliably match the sprite's actual,
+// correctly-loaded palette (confirmed by reading spr.palettes[1] back at the
+// point of failure) and silently resolves to an unrelated index instead,
+// corrupting the drawn color with no error.
+//
+// resolveExactPaletteColor works around this by resolving the color itself:
+// on an indexed sprite, a fully-transparent color (alpha 0, e.g. from a
+// "paint transparent" fill_area call) always resolves to spr.transparentColor
+// rather than a palette search, since transparency is a designated index, not
+// a color that is expected to exist in the palette. Any other color looks up
+// an EXACT match in the active palette and returns that index, erroring if
+// none exists (callers should pass use_palette=true to snap to the nearest
+// palette color instead). On a non-indexed sprite there is no palette to
+// resolve against, so it returns the raw color unchanged, preserving existing
+// RGB/grayscale behavior.
+func ResolveExactPaletteColorHelper() string {
+	return `
+-- Helper: Resolve an exact color for img:putPixel/app.useTool (usePalette=false)
+local function resolveExactPaletteColor(r, g, b, a)
+	local spr = app.activeSprite
+	if spr.colorMode ~= ColorMode.INDEXED then
+		return Color(r, g, b, a)
+	end
+
+	if a == 0 then
+		return spr.transparentColor
+	end
+
+	local palette = spr.palettes[1]
+	for i = 0, #palette - 1 do
+		local palColor = palette:getColor(i)
+		if palColor.red == r and palColor.green == g and palColor.blue == b and palColor.alpha == a then
+			return i
+		end
+	end
+
+	error(string.format(
+		"Color #%02X%02X%02X%02X has no exact match in the sprite's palette; use use_palette=true to snap to the nearest palette color",
+		r, g, b, a))
 end
 `
 }

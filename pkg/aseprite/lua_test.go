@@ -159,11 +159,11 @@ func TestLuaGenerator_DrawPixels(t *testing.T) {
 		t.Error("script missing layer iteration")
 	}
 
-	if !strings.Contains(script, "img:putPixel(0, 0, Color(255, 0, 0, 255))") {
+	if !strings.Contains(script, "img:putPixel(0, 0, resolveExactPaletteColor(255, 0, 0, 255))") {
 		t.Error("script missing first pixel")
 	}
 
-	if !strings.Contains(script, "img:putPixel(1, 1, Color(0, 255, 0, 255))") {
+	if !strings.Contains(script, "img:putPixel(1, 1, resolveExactPaletteColor(0, 255, 0, 255))") {
 		t.Error("script missing second pixel")
 	}
 }

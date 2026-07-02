@@ -30,11 +30,14 @@ func (g *LuaGenerator) DrawPixels(layerName string, frameNumber int, pixels []Pi
 
 	escapedName := EscapeString(layerName)
 
-	// Add palette snapper helper if needed
+	// Add the color resolution helper: nearest-match snapping when requested,
+	// otherwise exact-match-or-error (see ResolveExactPaletteColorHelper).
 	if usePalette {
 		sb.WriteString(GeneratePaletteSnapperHelper())
-		sb.WriteString("\n")
+	} else {
+		sb.WriteString(ResolveExactPaletteColorHelper())
 	}
+	sb.WriteString("\n")
 
 	sb.WriteString(fmt.Sprintf(`local spr = app.activeSprite
 if not spr then
@@ -106,11 +109,14 @@ print("Pixels drawn successfully")`)
 func (g *LuaGenerator) DrawLine(layerName string, frameNumber int, x1, y1, x2, y2 int, color Color, thickness int, usePalette bool) string {
 	var sb strings.Builder
 
-	// Add palette snapper helper if needed
+	// Add the color resolution helper: nearest-match snapping when requested,
+	// otherwise exact-match-or-error (see ResolveExactPaletteColorHelper).
 	if usePalette {
 		sb.WriteString(GeneratePaletteSnapperHelper())
-		sb.WriteString("\n")
+	} else {
+		sb.WriteString(ResolveExactPaletteColorHelper())
 	}
+	sb.WriteString("\n")
 
 	escapedName := EscapeString(layerName)
 	sb.WriteString(fmt.Sprintf(`local spr = app.activeSprite
@@ -190,11 +196,14 @@ print("Line drawn successfully")`,
 func (g *LuaGenerator) DrawContour(layerName string, frameNumber int, points []Point, color Color, thickness int, closed bool, usePalette bool) string {
 	var sb strings.Builder
 
-	// Add palette snapper helper if needed
+	// Add the color resolution helper: nearest-match snapping when requested,
+	// otherwise exact-match-or-error (see ResolveExactPaletteColorHelper).
 	if usePalette {
 		sb.WriteString(GeneratePaletteSnapperHelper())
-		sb.WriteString("\n")
+	} else {
+		sb.WriteString(ResolveExactPaletteColorHelper())
 	}
+	sb.WriteString("\n")
 
 	escapedName := EscapeString(layerName)
 	sb.WriteString(fmt.Sprintf(`local spr = app.activeSprite
@@ -295,11 +304,14 @@ print("Contour drawn successfully")`)
 func (g *LuaGenerator) DrawRectangle(layerName string, frameNumber int, x, y, width, height int, color Color, filled bool, usePalette bool) string {
 	var sb strings.Builder
 
-	// Add palette snapper helper if needed
+	// Add the color resolution helper: nearest-match snapping when requested,
+	// otherwise exact-match-or-error (see ResolveExactPaletteColorHelper).
 	if usePalette {
 		sb.WriteString(GeneratePaletteSnapperHelper())
-		sb.WriteString("\n")
+	} else {
+		sb.WriteString(ResolveExactPaletteColorHelper())
 	}
+	sb.WriteString("\n")
 
 	escapedName := EscapeString(layerName)
 	tool := "rectangle"
@@ -379,11 +391,14 @@ print("Rectangle drawn successfully")`,
 func (g *LuaGenerator) DrawCircle(layerName string, frameNumber int, centerX, centerY, radius int, color Color, filled bool, usePalette bool) string {
 	var sb strings.Builder
 
-	// Add palette snapper helper if needed
+	// Add the color resolution helper: nearest-match snapping when requested,
+	// otherwise exact-match-or-error (see ResolveExactPaletteColorHelper).
 	if usePalette {
 		sb.WriteString(GeneratePaletteSnapperHelper())
-		sb.WriteString("\n")
+	} else {
+		sb.WriteString(ResolveExactPaletteColorHelper())
 	}
+	sb.WriteString("\n")
 
 	escapedName := EscapeString(layerName)
 	tool := "ellipse"
@@ -469,11 +484,14 @@ print("Circle drawn successfully")`,
 func (g *LuaGenerator) FillArea(layerName string, frameNumber int, x, y int, color Color, tolerance int, usePalette bool) string {
 	var sb strings.Builder
 
-	// Add palette snapper helper if needed
+	// Add the color resolution helper: nearest-match snapping when requested,
+	// otherwise exact-match-or-error (see ResolveExactPaletteColorHelper).
 	if usePalette {
 		sb.WriteString(GeneratePaletteSnapperHelper())
-		sb.WriteString("\n")
+	} else {
+		sb.WriteString(ResolveExactPaletteColorHelper())
 	}
+	sb.WriteString("\n")
 
 	escapedName := EscapeString(layerName)
 	sb.WriteString(fmt.Sprintf(`local spr = app.activeSprite
