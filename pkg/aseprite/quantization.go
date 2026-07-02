@@ -110,14 +110,27 @@ func MedianCutQuantization(pixels []color.Color, targetColors int) []color.Color
 		return nil
 	}
 
+	// Reduce to a frequency histogram of unique colors before bucketing. A
+	// raw, duplicate-laden pixel list biases every split toward whatever
+	// large solid-fill color dominates the pixel count: cutting at the
+	// pixel-COUNT median of a mostly-one-color bucket lands the split point
+	// inside that same color's run (not at a boundary between colors), so
+	// the algorithm keeps re-subdividing the dominant fill while small
+	// accent regions (a 2px highlight next to a 200px fill, typical of
+	// pixel art) never get isolated into their own bucket and end up
+	// averaged into a blended, off-palette color instead. Splitting the
+	// unique-color histogram instead guarantees the split always falls
+	// between distinct colors, so targetColors >= the number of unique
+	// colors recovers every one of them exactly.
+	entries := buildColorHistogram(pixels)
+
 	// Ensure targetColors doesn't exceed number of unique colors
-	uniqueColors := countUniqueColorsInSlice(pixels)
-	if targetColors > uniqueColors {
-		targetColors = uniqueColors
+	if targetColors > len(entries) {
+		targetColors = len(entries)
 	}
 
-	// Create initial bucket with all pixels
-	buckets := []colorBucket{{pixels: pixels}}
+	// Create initial bucket with all unique colors
+	buckets := []colorBucket{{entries: entries}}
 
 	// Recursively split buckets until we have targetColors
 	for len(buckets) < targetColors {
@@ -132,7 +145,7 @@ func MedianCutQuantization(pixels []color.Color, targetColors int) []color.Color
 			}
 		}
 
-		// Stop if no bucket has any range (all colors are identical)
+		// Stop if no bucket has any range (all remaining buckets are single colors)
 		if maxRange == 0 {
 			break
 		}
@@ -154,22 +167,48 @@ func MedianCutQuantization(pixels []color.Color, targetColors int) []color.Color
 	return palette
 }
 
-// colorBucket represents a bucket of colors for median cut algorithm.
+// colorCount pairs a unique color with the number of pixels that had it.
+type colorCount struct {
+	c     color.Color
+	count int
+}
+
+// buildColorHistogram reduces a (possibly duplicate-laden) pixel slice to a
+// list of unique colors with their pixel counts, preserving first-seen order.
+func buildColorHistogram(pixels []color.Color) []colorCount {
+	index := make(map[uint32]int, len(pixels))
+	entries := make([]colorCount, 0, len(pixels))
+
+	for _, p := range pixels {
+		r, g, b, _ := p.RGBA()
+		key := (r&0xFF00)<<8 | (g & 0xFF00) | (b&0xFF00)>>8
+		if i, ok := index[key]; ok {
+			entries[i].count++
+			continue
+		}
+		index[key] = len(entries)
+		entries = append(entries, colorCount{c: p, count: 1})
+	}
+
+	return entries
+}
+
+// colorBucket represents a bucket of unique colors (with pixel counts) for the median cut algorithm.
 type colorBucket struct {
-	pixels []color.Color
+	entries []colorCount
 }
 
 // colorRange calculates the range of the bucket in RGB space.
 func (b *colorBucket) colorRange() float64 {
-	if len(b.pixels) == 0 {
+	if len(b.entries) == 0 {
 		return 0
 	}
 
 	var minR, minG, minB uint32 = 65535, 65535, 65535
 	var maxR, maxG, maxB uint32 = 0, 0, 0
 
-	for _, p := range b.pixels {
-		r, g, bl, _ := p.RGBA()
+	for _, e := range b.entries {
+		r, g, bl, _ := e.c.RGBA()
 		if r < minR {
 			minR = r
 		}
@@ -197,9 +236,15 @@ func (b *colorBucket) colorRange() float64 {
 	return rRange + gRange + bRange
 }
 
-// split splits the bucket along the dimension with the largest range.
+// split splits the bucket along the dimension with the largest range. The
+// split point is chosen where cumulative pixel count crosses half of the
+// bucket's total pixel mass (so common colors still get split priority over
+// rare ones, matching standard median-cut behavior), but since entries are
+// already unique colors, the split always falls BETWEEN distinct colors -
+// never through the middle of one - so a bucket of already-few unique colors
+// is never blended together by a split.
 func (b *colorBucket) split() (colorBucket, colorBucket) {
-	if len(b.pixels) < 2 {
+	if len(b.entries) < 2 {
 		return *b, colorBucket{}
 	}
 
@@ -207,8 +252,8 @@ func (b *colorBucket) split() (colorBucket, colorBucket) {
 	var minR, minG, minB uint32 = 65535, 65535, 65535
 	var maxR, maxG, maxB uint32 = 0, 0, 0
 
-	for _, p := range b.pixels {
-		r, g, bl, _ := p.RGBA()
+	for _, e := range b.entries {
+		r, g, bl, _ := e.c.RGBA()
 		if r < minR {
 			minR = r
 		}
@@ -233,57 +278,82 @@ func (b *colorBucket) split() (colorBucket, colorBucket) {
 	gRange := maxG - minG
 	bRange := maxB - minB
 
-	// Sort pixels by the dimension with largest range
-	pixels := make([]color.Color, len(b.pixels))
-	copy(pixels, b.pixels)
+	// Sort unique colors by the dimension with largest range
+	entries := make([]colorCount, len(b.entries))
+	copy(entries, b.entries)
 
 	if rRange >= gRange && rRange >= bRange {
 		// Sort by red
-		sort.Slice(pixels, func(i, j int) bool {
-			r1, _, _, _ := pixels[i].RGBA()
-			r2, _, _, _ := pixels[j].RGBA()
+		sort.Slice(entries, func(i, j int) bool {
+			r1, _, _, _ := entries[i].c.RGBA()
+			r2, _, _, _ := entries[j].c.RGBA()
 			return r1 < r2
 		})
 	} else if gRange >= bRange {
 		// Sort by green
-		sort.Slice(pixels, func(i, j int) bool {
-			_, g1, _, _ := pixels[i].RGBA()
-			_, g2, _, _ := pixels[j].RGBA()
+		sort.Slice(entries, func(i, j int) bool {
+			_, g1, _, _ := entries[i].c.RGBA()
+			_, g2, _, _ := entries[j].c.RGBA()
 			return g1 < g2
 		})
 	} else {
 		// Sort by blue
-		sort.Slice(pixels, func(i, j int) bool {
-			_, _, b1, _ := pixels[i].RGBA()
-			_, _, b2, _ := pixels[j].RGBA()
+		sort.Slice(entries, func(i, j int) bool {
+			_, _, b1, _ := entries[i].c.RGBA()
+			_, _, b2, _ := entries[j].c.RGBA()
 			return b1 < b2
 		})
 	}
 
-	// Split at median
-	mid := len(pixels) / 2
-	return colorBucket{pixels: pixels[:mid]}, colorBucket{pixels: pixels[mid:]}
+	// Split where cumulative pixel count crosses half the bucket's total
+	// mass, clamped so both sides always get at least one unique color.
+	total := 0
+	for _, e := range entries {
+		total += e.count
+	}
+	half := total / 2
+
+	cum := 0
+	splitIdx := 1
+	for i, e := range entries {
+		cum += e.count
+		if cum >= half {
+			splitIdx = i + 1
+			break
+		}
+	}
+	if splitIdx < 1 {
+		splitIdx = 1
+	}
+	if splitIdx > len(entries)-1 {
+		splitIdx = len(entries) - 1
+	}
+
+	return colorBucket{entries: entries[:splitIdx]}, colorBucket{entries: entries[splitIdx:]}
 }
 
-// average calculates the average color of the bucket.
+// average calculates the pixel-count-weighted average color of the bucket.
+// A single-entry bucket returns that entry's exact color unchanged.
 func (b *colorBucket) average() color.Color {
-	if len(b.pixels) == 0 {
+	if len(b.entries) == 0 {
 		return color.RGBA{R: 0, G: 0, B: 0, A: 255}
 	}
 
 	var sumR, sumG, sumB uint64
-	for _, p := range b.pixels {
-		r, g, bl, _ := p.RGBA()
-		sumR += uint64(r)
-		sumG += uint64(g)
-		sumB += uint64(bl)
+	var totalCount uint64
+	for _, e := range b.entries {
+		r, g, bl, _ := e.c.RGBA()
+		w := uint64(e.count)
+		sumR += uint64(r) * w
+		sumG += uint64(g) * w
+		sumB += uint64(bl) * w
+		totalCount += w
 	}
 
-	count := uint64(len(b.pixels))
 	return color.RGBA{
-		R: uint8((sumR / count) >> 8),
-		G: uint8((sumG / count) >> 8),
-		B: uint8((sumB / count) >> 8),
+		R: uint8((sumR / totalCount) >> 8),
+		G: uint8((sumG / totalCount) >> 8),
+		B: uint8((sumB / totalCount) >> 8),
 		A: 255,
 	}
 }
@@ -593,19 +663,6 @@ func CountUniqueColors(img image.Image, preserveTransparency bool) int {
 			packed := (r&0xFF00)<<8 | (g & 0xFF00) | (b&0xFF00)>>8
 			colorSet[packed] = true
 		}
-	}
-
-	return len(colorSet)
-}
-
-// countUniqueColorsInSlice counts unique colors in a slice of colors.
-func countUniqueColorsInSlice(pixels []color.Color) int {
-	colorSet := make(map[uint32]bool)
-
-	for _, p := range pixels {
-		r, g, b, _ := p.RGBA()
-		packed := (r&0xFF00)<<8 | (g & 0xFF00) | (b&0xFF00)>>8
-		colorSet[packed] = true
 	}
 
 	return len(colorSet)

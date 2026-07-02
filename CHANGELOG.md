@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **quantize_palette: median cut blends distinct colors under imbalanced pixel frequency**
+  - `MedianCutQuantization` split each bucket at the pixel-array midpoint
+    (`mid := len(pixels) / 2`), not at a boundary between distinct colors.
+    Pixel art typically has wildly imbalanced color frequency (a large
+    solid fill vastly outnumbering a 1-2px accent detail), so splitting at
+    the raw pixel-count median lands the cut inside the dominant color's
+    own run instead of between colors
+  - The dominant color got needlessly re-subdivided into near-duplicate
+    buckets while rare accent colors never got isolated into their own
+    bucket, and were instead averaged into a blended, off-palette hex
+    value - even when `target_colors` comfortably exceeded the number of
+    unique colors actually present, which should guarantee lossless
+    recovery
+  - Fixed by reducing to a frequency-weighted histogram of unique colors
+    before bucketing, so a split always falls between distinct colors;
+    the split point still favors common colors over rare ones by
+    cumulative pixel count, preserving normal median-cut reduction
+    behavior when `target_colors` is genuinely smaller than the number of
+    unique colors
+
 ## [0.5.0] - 2025-10-18
 
 ### Added
