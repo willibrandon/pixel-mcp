@@ -25,6 +25,15 @@ func (g *LuaGenerator) CreateCanvas(width, height int, colorMode ColorMode, file
 	if colorMode == ColorModeIndexed {
 		return fmt.Sprintf(`local spr = Sprite(%d, %d, %s)
 spr.transparentColor = 255
+-- A new indexed sprite's initial cel is filled with palette index 0, but index
+-- 255 is the transparent index (set above), so index 0 is now an opaque color
+-- and the canvas would start as an opaque background instead of transparent.
+-- Clear the initial cel to the transparent color so a fresh indexed canvas is
+-- genuinely transparent.
+local initialCel = spr.layers[1]:cel(spr.frames[1])
+if initialCel and initialCel.image then
+	initialCel.image:clear(spr.transparentColor)
+end
 spr:saveAs("%s")
 print("%s")`, width, height, colorMode.ToLua(), escapedFilename, escapedFilename)
 	}

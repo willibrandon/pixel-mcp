@@ -119,6 +119,31 @@ func TestLuaGenerator_CreateCanvas(t *testing.T) {
 	if !strings.Contains(script, `print("test.aseprite")`) {
 		t.Error("script missing print statement")
 	}
+
+	// RGB canvases have no transparent-index remapping, so no initial-cel clear.
+	if strings.Contains(script, "initialCel.image:clear") {
+		t.Error("RGB script should not clear the initial cel")
+	}
+}
+
+// TestLuaGenerator_CreateCanvas_IndexedClearsInitialCel verifies that an indexed
+// canvas clears its initial cel to the transparent color.
+//
+// A new indexed sprite's initial cel is filled with palette index 0, but index
+// 255 is designated transparent, so index 0 is opaque. Without clearing the
+// initial cel, a fresh indexed canvas starts with an opaque (black on DB32)
+// background instead of a transparent one. Pure string check so it runs in CI
+// without a real Aseprite install.
+func TestLuaGenerator_CreateCanvas_IndexedClearsInitialCel(t *testing.T) {
+	gen := NewLuaGenerator()
+	script := gen.CreateCanvas(32, 32, ColorModeIndexed, "sprite.aseprite")
+
+	if !strings.Contains(script, "spr.transparentColor = 255") {
+		t.Error("indexed script missing transparentColor assignment")
+	}
+	if !strings.Contains(script, "initialCel.image:clear(spr.transparentColor)") {
+		t.Error("indexed script does not clear the initial cel to the transparent color")
+	}
 }
 
 func TestLuaGenerator_AddLayer(t *testing.T) {
@@ -159,12 +184,67 @@ func TestLuaGenerator_DrawPixels(t *testing.T) {
 		t.Error("script missing layer iteration")
 	}
 
-	if !strings.Contains(script, "img:putPixel(0, 0, Color(255, 0, 0, 255))") {
+	if !strings.Contains(script, "img:putPixel(0, 0, resolveExactPaletteColor(255, 0, 0, 255))") {
 		t.Error("script missing first pixel")
 	}
 
-	if !strings.Contains(script, "img:putPixel(1, 1, Color(0, 255, 0, 255))") {
+	if !strings.Contains(script, "img:putPixel(1, 1, resolveExactPaletteColor(0, 255, 0, 255))") {
 		t.Error("script missing second pixel")
+	}
+}
+
+// TestLuaGenerator_DrawPixels_NormalizesCel verifies the generated script
+// normalizes the target cel to a full-canvas image at (0,0) before writing.
+//
+// Image:putPixel uses cel-LOCAL coordinates, so the script must guarantee the
+// cel covers the whole sprite at origin (0,0); otherwise pixels are offset by
+// the cel's position whenever the layer's content does not start at (0,0)
+// (e.g. after a shape tool trims the cel). This is a pure string check so it
+// runs without Aseprite — guarding the fix in CI, where the integration tests
+// (which require a real Aseprite install) do not run.
+func TestLuaGenerator_DrawPixels_NormalizesCel(t *testing.T) {
+	gen := NewLuaGenerator()
+	pixels := []Pixel{{Point: Point{X: 3, Y: 4}, Color: Color{R: 1, G: 2, B: 3, A: 255}}}
+	script := gen.DrawPixels("Layer 1", 1, pixels, false)
+
+	wants := []string{
+		"Image(spr.width, spr.height, spr.colorMode)", // full-canvas image
+		"full:drawImage(cel.image, cel.position)",     // preserve existing content
+		"cel.position = Point(0, 0)",                  // reposition existing cel to origin
+		"spr:newCel(layer, frame, full, Point(0, 0))", // new cel carries a full-canvas image
+	}
+	for _, w := range wants {
+		if !strings.Contains(script, w) {
+			t.Errorf("generated script missing %q; cel is not normalized to full-canvas at (0,0)", w)
+		}
+	}
+}
+
+// TestLuaGenerator_DrawPixels_ClearsIndexedTransparentBackground verifies the
+// generated script clears each freshly-created full-canvas image to the sprite's
+// transparent color on indexed sprites.
+//
+// A new indexed Image is filled with index 0, but CreateCanvas designates index
+// 255 as the transparent color, so an uncleared background is opaque. Without the
+// clear, the default (NORMAL blend) drawImage skips the source's transparent
+// pixels and leaves previously-transparent pixels as opaque index 0 -- silently
+// turning transparent areas into opaque black. The clear must apply to both the
+// composite branch (existing cel) and the new-cel branch. This is a pure string
+// check so it runs without Aseprite, guarding the fix in CI where the integration
+// tests do not run.
+func TestLuaGenerator_DrawPixels_ClearsIndexedTransparentBackground(t *testing.T) {
+	gen := NewLuaGenerator()
+	pixels := []Pixel{{Point: Point{X: 0, Y: 0}, Color: Color{R: 1, G: 2, B: 3, A: 255}}}
+	script := gen.DrawPixels("Layer 1", 1, pixels, false)
+
+	// Guarded on indexed mode so RGB/grayscale behavior is unchanged.
+	if !strings.Contains(script, "if spr.colorMode == ColorMode.INDEXED then") {
+		t.Error("generated script missing indexed-mode guard for the transparent-background clear")
+	}
+	// Clears to the sprite's transparent color (index 255), not the default index 0.
+	// Must apply to BOTH the composite branch and the new-cel branch.
+	if got := strings.Count(script, "full:clear(spr.transparentColor)"); got != 2 {
+		t.Errorf("expected the full-canvas image to be cleared to the transparent color in both cel branches, got %d occurrence(s)", got)
 	}
 }
 

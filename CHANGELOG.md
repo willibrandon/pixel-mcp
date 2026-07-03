@@ -7,6 +7,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **draw_pixels: a later call reverts previously-transparent pixels to opaque black**
+  - On an indexed sprite `CreateCanvas` sets `Sprite.transparentColor` to 255 so
+    palette index 0 can hold a real color, which means index 0 is opaque. When
+    `draw_pixels` normalizes the target cel it builds a full-canvas image with
+    `Image(spr.width, spr.height, spr.colorMode)`, and a freshly created indexed
+    image is filled with index 0 (opaque), not the transparent index
+  - Compositing the existing content with the default NORMAL blend
+    (`full:drawImage(cel.image, cel.position)`) skips the source's transparent
+    (index 255) pixels, so every pixel a previous call had made transparent but
+    the current call does not rewrite is left showing the opaque index-0
+    background, silently turning transparent areas into opaque black (the exact
+    symptom warned about for locked-palette sprites)
+  - Fixed by clearing the full-canvas image to the sprite's transparent color
+    (`full:clear(spr.transparentColor)`) before compositing/drawing on indexed
+    sprites, in both the existing-cel and new-cel paths; RGB and grayscale
+    behavior is unchanged
+- **create_canvas: a new indexed canvas starts opaque instead of transparent**
+  - A new indexed sprite's initial cel is filled with palette index 0, but
+    `CreateCanvas` designates index 255 as the transparent color, so index 0 is
+    an opaque color (black on DawnBringer 32) and a fresh canvas read back as an
+    opaque background rather than transparent
+  - Fixed by clearing the initial cel to the sprite's transparent color right
+    after creation, so a fresh indexed canvas is genuinely transparent; RGB and
+    grayscale are unaffected
+- **quantize_palette: median cut blends distinct colors under imbalanced pixel frequency**
+  - `MedianCutQuantization` split each bucket at the pixel-array midpoint
+    (`mid := len(pixels) / 2`), not at a boundary between distinct colors.
+    Pixel art typically has wildly imbalanced color frequency (a large
+    solid fill vastly outnumbering a 1-2px accent detail), so splitting at
+    the raw pixel-count median lands the cut inside the dominant color's
+    own run instead of between colors
+  - The dominant color got needlessly re-subdivided into near-duplicate
+    buckets while rare accent colors never got isolated into their own
+    bucket, and were instead averaged into a blended, off-palette hex
+    value - even when `target_colors` comfortably exceeded the number of
+    unique colors actually present, which should guarantee lossless
+    recovery
+  - Fixed by reducing to a frequency-weighted histogram of unique colors
+    before bucketing, so a split always falls between distinct colors;
+    the split point still favors common colors over rare ones by
+    cumulative pixel count, preserving normal median-cut reduction
+    behavior when `target_colors` is genuinely smaller than the number of
+    unique colors
+- **Indexed palette: transparentColor collides with a real color after resize**
+  - `Palette:resize` silently clamps `Sprite.transparentColor` into the new
+    palette's valid index range, so after `set_palette`, `quantize_palette`,
+    `add_palette_color`, or `apply_auto_shading` resize an indexed sprite's
+    palette, the sprite's transparent-color index can land on the same index
+    as a real, in-use color (typically the palette's last entry)
+  - Once that collision happens, painting "transparent" (e.g. `fill_area`
+    with a fully-transparent color) writes that colliding index, so
+    background fills read back as an opaque real color instead of
+    transparent, and pixels intentionally drawn in that color can be
+    auto-trimmed away as if they were transparent
+  - Fixed by re-asserting `transparentColor = 255` after every palette
+    resize on an indexed sprite, keeping it safely out of the palette's
+    real, addressable range
+
 ## [0.5.0] - 2025-10-18
 
 ### Added

@@ -8,7 +8,7 @@ import (
 func TestFormatColorWithPalette_NoPalette(t *testing.T) {
 	color := Color{R: 255, G: 128, B: 64, A: 255}
 	result := FormatColorWithPalette(color, false)
-	expected := "Color(255, 128, 64, 255)"
+	expected := "resolveExactPaletteColor(255, 128, 64, 255)"
 	if result != expected {
 		t.Errorf("FormatColorWithPalette(usePalette=false) = %s, want %s", result, expected)
 	}
