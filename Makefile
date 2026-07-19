@@ -1,4 +1,4 @@
-.PHONY: all build release test test-nocache test-integration test-integration-nocache test-coverage bench lint clean install docker-build-ci docker-test docker-test-integration docker-test-all docker-build docker-build-full docker-run docker-run-full
+.PHONY: all build release cross test test-nocache test-integration test-integration-nocache test-coverage bench lint clean install docker-build-ci docker-test docker-test-integration docker-test-all docker-build docker-build-full docker-run docker-run-full
 
 # Binary name
 BINARY_NAME=pixel-mcp
@@ -22,6 +22,20 @@ build:
 
 release:
 	go build $(LDFLAGS) -o bin/$(BINARY_NAME) ./cmd/pixel-mcp
+
+# Cross-compile the server and launcher for all release platforms
+CROSS_PLATFORMS=darwin/amd64 darwin/arm64 linux/amd64 linux/arm64 windows/amd64
+
+cross:
+	@mkdir -p bin
+	@for platform in $(CROSS_PLATFORMS); do \
+		os=$${platform%/*}; arch=$${platform#*/}; ext=""; \
+		if [ "$$os" = "windows" ]; then ext=".exe"; fi; \
+		echo "Building pixel-mcp-$$os-$$arch$$ext"; \
+		GOOS=$$os GOARCH=$$arch CGO_ENABLED=0 go build $(LDFLAGS) -o bin/pixel-mcp-$$os-$$arch$$ext ./cmd/pixel-mcp || exit 1; \
+		echo "Building pixel-mcp-launcher-$$os-$$arch$$ext"; \
+		GOOS=$$os GOARCH=$$arch CGO_ENABLED=0 go build -ldflags "-s -w" -o bin/pixel-mcp-launcher-$$os-$$arch$$ext ./cmd/pixel-mcp-launcher || exit 1; \
+	done
 
 test:
 	go test -v -race -cover ./...

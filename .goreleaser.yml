@@ -27,6 +27,25 @@ builds:
       - -X main.Version={{.Version}}
       - -X main.BuildTime={{.Date}}
 
+  - id: pixel-mcp-launcher
+    binary: pixel-mcp-launcher
+    main: ./cmd/pixel-mcp-launcher
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    # Ignore arm64 on Windows for now
+    ignore:
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w
+
 archives:
   - id: default
     name_template: >-

@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Cross-Platform Launcher** (`pixel-mcp-launcher`)
+  - Native launcher binary that detects OS/architecture at runtime and executes
+    the matching `pixel-mcp-{os}-{arch}[.exe]` binary from its own directory
+  - Replaces pixel-plugin's bash wrapper script, which is not executable on
+    native Windows (willibrandon/pixel-mcp#18, willibrandon/pixel-plugin#3)
+  - Args, stdio, environment, and exit codes are passed through; on Unix the
+    launcher execs the server binary in place
+  - `make cross` target cross-compiles server and launcher for darwin/amd64,
+    darwin/arm64, linux/amd64, linux/arm64, and windows/amd64
+  - GoReleaser now builds and publishes launcher binaries alongside the server
+
 ## [0.5.0] - 2025-10-18
 
 ### Added
