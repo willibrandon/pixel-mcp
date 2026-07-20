@@ -81,8 +81,9 @@ for i, color in ipairs(colors) do
 	palette:setColor(i - 1, color)  -- Palette is 0-indexed
 end
 
+%s
 spr:saveAs(spr.filename)
-print("Palette set successfully")`, len(colors), colorList)
+print("Palette set successfully")`, len(colors), colorList, ReassertIndexedTransparentColor())
 }
 
 // GetPalette generates a Lua script to retrieve the sprite's current palette.
@@ -235,11 +236,12 @@ local newIndex = #palette
 palette:resize(#palette + 1)
 palette:setColor(newIndex, Color{r=%d, g=%d, b=%d, a=%d})
 
+%s
 spr:saveAs(spr.filename)
 
 -- Output JSON with color_index
 local output = string.format('{"color_index":%%d}', newIndex)
-print(output)`, red, green, blue, alpha)
+print(output)`, red, green, blue, alpha, ReassertIndexedTransparentColor())
 }
 
 // SortPalette generates a Lua script to sort the palette by a specified method.

@@ -30,11 +30,14 @@ func (g *LuaGenerator) DrawPixels(layerName string, frameNumber int, pixels []Pi
 
 	escapedName := EscapeString(layerName)
 
-	// Add palette snapper helper if needed
+	// Add the color resolution helper: nearest-match snapping when requested,
+	// otherwise exact-match-or-error (see ResolveExactPaletteColorHelper).
 	if usePalette {
 		sb.WriteString(GeneratePaletteSnapperHelper())
-		sb.WriteString("\n")
+	} else {
+		sb.WriteString(ResolveExactPaletteColorHelper())
 	}
+	sb.WriteString("\n")
 
 	sb.WriteString(fmt.Sprintf(`local spr = app.activeSprite
 if not spr then
@@ -61,8 +64,35 @@ end
 
 app.transaction(function()
 	local cel = layer:cel(frame)
-	if not cel then
-		cel = spr:newCel(layer, frame)
+	if cel and cel.image then
+		-- Composite existing content into a full-canvas image at (0,0) so that
+		-- sprite coordinates match image coordinates for putPixel below. Without
+		-- this, Image:putPixel uses cel-local coordinates and pixels are offset
+		-- by the cel's position whenever content does not start at (0,0).
+		local full = Image(spr.width, spr.height, spr.colorMode)
+		-- A freshly created indexed Image is filled with index 0, but on these
+		-- sprites the transparent index is 255 (set by CreateCanvas). Clear the
+		-- new image to the sprite's transparent color first; otherwise the
+		-- default (NORMAL blend) drawImage below skips the source's transparent
+		-- pixels and leaves the opaque index-0 background showing through,
+		-- silently turning already-transparent pixels into opaque black.
+		if spr.colorMode == ColorMode.INDEXED then
+			full:clear(spr.transparentColor)
+		end
+		full:drawImage(cel.image, cel.position)
+		cel.image = full
+		cel.position = Point(0, 0)
+	else
+		-- No cel yet (or nil image, e.g. a freshly added layer): create a
+		-- full-canvas cel WITH an image so putPixel has a valid target.
+		local full = Image(spr.width, spr.height, spr.colorMode)
+		-- Same transparent-background fix as above: without clearing to the
+		-- transparent index, every untouched pixel of a new indexed cel would be
+		-- opaque index 0 instead of transparent.
+		if spr.colorMode == ColorMode.INDEXED then
+			full:clear(spr.transparentColor)
+		end
+		cel = spr:newCel(layer, frame, full, Point(0, 0))
 	end
 
 	local img = cel.image
@@ -106,11 +136,14 @@ print("Pixels drawn successfully")`)
 func (g *LuaGenerator) DrawLine(layerName string, frameNumber int, x1, y1, x2, y2 int, color Color, thickness int, usePalette bool) string {
 	var sb strings.Builder
 
-	// Add palette snapper helper if needed
+	// Add the color resolution helper: nearest-match snapping when requested,
+	// otherwise exact-match-or-error (see ResolveExactPaletteColorHelper).
 	if usePalette {
 		sb.WriteString(GeneratePaletteSnapperHelper())
-		sb.WriteString("\n")
+	} else {
+		sb.WriteString(ResolveExactPaletteColorHelper())
 	}
+	sb.WriteString("\n")
 
 	escapedName := EscapeString(layerName)
 	sb.WriteString(fmt.Sprintf(`local spr = app.activeSprite
@@ -190,11 +223,14 @@ print("Line drawn successfully")`,
 func (g *LuaGenerator) DrawContour(layerName string, frameNumber int, points []Point, color Color, thickness int, closed bool, usePalette bool) string {
 	var sb strings.Builder
 
-	// Add palette snapper helper if needed
+	// Add the color resolution helper: nearest-match snapping when requested,
+	// otherwise exact-match-or-error (see ResolveExactPaletteColorHelper).
 	if usePalette {
 		sb.WriteString(GeneratePaletteSnapperHelper())
-		sb.WriteString("\n")
+	} else {
+		sb.WriteString(ResolveExactPaletteColorHelper())
 	}
+	sb.WriteString("\n")
 
 	escapedName := EscapeString(layerName)
 	sb.WriteString(fmt.Sprintf(`local spr = app.activeSprite
@@ -295,11 +331,14 @@ print("Contour drawn successfully")`)
 func (g *LuaGenerator) DrawRectangle(layerName string, frameNumber int, x, y, width, height int, color Color, filled bool, usePalette bool) string {
 	var sb strings.Builder
 
-	// Add palette snapper helper if needed
+	// Add the color resolution helper: nearest-match snapping when requested,
+	// otherwise exact-match-or-error (see ResolveExactPaletteColorHelper).
 	if usePalette {
 		sb.WriteString(GeneratePaletteSnapperHelper())
-		sb.WriteString("\n")
+	} else {
+		sb.WriteString(ResolveExactPaletteColorHelper())
 	}
+	sb.WriteString("\n")
 
 	escapedName := EscapeString(layerName)
 	tool := "rectangle"
@@ -379,11 +418,14 @@ print("Rectangle drawn successfully")`,
 func (g *LuaGenerator) DrawCircle(layerName string, frameNumber int, centerX, centerY, radius int, color Color, filled bool, usePalette bool) string {
 	var sb strings.Builder
 
-	// Add palette snapper helper if needed
+	// Add the color resolution helper: nearest-match snapping when requested,
+	// otherwise exact-match-or-error (see ResolveExactPaletteColorHelper).
 	if usePalette {
 		sb.WriteString(GeneratePaletteSnapperHelper())
-		sb.WriteString("\n")
+	} else {
+		sb.WriteString(ResolveExactPaletteColorHelper())
 	}
+	sb.WriteString("\n")
 
 	escapedName := EscapeString(layerName)
 	tool := "ellipse"
@@ -469,11 +511,14 @@ print("Circle drawn successfully")`,
 func (g *LuaGenerator) FillArea(layerName string, frameNumber int, x, y int, color Color, tolerance int, usePalette bool) string {
 	var sb strings.Builder
 
-	// Add palette snapper helper if needed
+	// Add the color resolution helper: nearest-match snapping when requested,
+	// otherwise exact-match-or-error (see ResolveExactPaletteColorHelper).
 	if usePalette {
 		sb.WriteString(GeneratePaletteSnapperHelper())
-		sb.WriteString("\n")
+	} else {
+		sb.WriteString(ResolveExactPaletteColorHelper())
 	}
+	sb.WriteString("\n")
 
 	escapedName := EscapeString(layerName)
 	sb.WriteString(fmt.Sprintf(`local spr = app.activeSprite

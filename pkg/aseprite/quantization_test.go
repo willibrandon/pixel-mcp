@@ -55,6 +55,66 @@ func TestMedianCutQuantization(t *testing.T) {
 	}
 }
 
+// TestMedianCutQuantization_ImbalancedFrequencyPreservesExactColors reproduces
+// the split-by-pixel-count bug: a bucket containing a large solid-fill color
+// alongside a handful of rare accent colors used to get bisected at the
+// pixel-count median, landing the split point inside the dominant color's own
+// run instead of at a boundary between colors. That blended rare accent
+// colors into off-palette hex values and could even drop them from the
+// palette entirely, even though targetColors comfortably exceeded the number
+// of unique colors present (which should guarantee lossless recovery).
+func TestMedianCutQuantization_ImbalancedFrequencyPreservesExactColors(t *testing.T) {
+	// Mirrors a typical pixel-art color distribution: a couple of large
+	// fills (many samples) plus several tiny accent regions (1-2 samples).
+	pixels := make([]color.Color, 0, 320)
+	appendN := func(c color.Color, n int) {
+		for i := 0; i < n; i++ {
+			pixels = append(pixels, c)
+		}
+	}
+
+	tunicGreen := color.RGBA{R: 0x6A, G: 0xBE, B: 0x30, A: 255}
+	skin := color.RGBA{R: 0xD9, G: 0xA0, B: 0x66, A: 255}
+	outline := color.RGBA{R: 0x22, G: 0x20, B: 0x34, A: 255}
+	highlight := color.RGBA{R: 0x99, G: 0xE5, B: 0x50, A: 255}
+	buckle := color.RGBA{R: 0xFB, G: 0xF2, B: 0x36, A: 255}
+
+	appendN(tunicGreen, 200)
+	appendN(skin, 90)
+	appendN(outline, 20)
+	appendN(highlight, 2)
+	appendN(buckle, 2)
+
+	want := map[color.RGBA]bool{
+		tunicGreen: true, skin: true, outline: true, highlight: true, buckle: true,
+	}
+
+	// Target far exceeds the 5 unique colors present, so every one of them
+	// must come back exactly - no blending, no duplicates, no drops.
+	palette := MedianCutQuantization(pixels, 32)
+
+	if len(palette) != len(want) {
+		t.Fatalf("MedianCutQuantization() returned %d colors, want %d (one bucket per unique input color): %v",
+			len(palette), len(want), palette)
+	}
+
+	seen := make(map[color.RGBA]bool, len(palette))
+	for _, c := range palette {
+		rgba, ok := c.(color.RGBA)
+		if !ok {
+			r, g, b, a := c.RGBA()
+			rgba = color.RGBA{R: uint8(r >> 8), G: uint8(g >> 8), B: uint8(b >> 8), A: uint8(a >> 8)}
+		}
+		if !want[rgba] {
+			t.Errorf("palette contains %+v, which is not one of the 5 exact input colors (blended/off-palette result)", rgba)
+		}
+		if seen[rgba] {
+			t.Errorf("palette contains duplicate entry %+v (a unique color's bucket was split into two near-identical averages)", rgba)
+		}
+		seen[rgba] = true
+	}
+}
+
 func TestOctreeQuantization(t *testing.T) {
 	tests := []struct {
 		name         string

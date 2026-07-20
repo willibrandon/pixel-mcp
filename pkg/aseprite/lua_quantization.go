@@ -95,6 +95,7 @@ for i, color in ipairs(colors) do
 	palette:setColor(i - 1, color)  -- Palette is 0-indexed
 end
 %s
+%s
 -- Prepare palette for JSON output
 local paletteHex = {}
 for i = 0, #palette - 1 do
@@ -121,12 +122,13 @@ spr:saveAs(spr.filename)
 
 -- Print JSON result
 print(json)`,
-		len(palette),            // palette resize
-		colorList,               // color list
-		conversionCode,          // conversion code
-		originalColors,          // original_colors
-		len(palette),            // quantized_colors
-		EscapeString(algorithm)) // algorithm_used
+		len(palette),                      // palette resize
+		colorList,                         // color list
+		conversionCode,                    // conversion code
+		ReassertIndexedTransparentColor(), // keep transparentColor out of the real palette range
+		originalColors,                    // original_colors
+		len(palette),                      // quantized_colors
+		EscapeString(algorithm))           // algorithm_used
 }
 
 // ReplaceWithImage generates a Lua script to replace sprite content with an external image.

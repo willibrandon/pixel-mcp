@@ -238,8 +238,9 @@ func TestIntegration_SetPalette_ThenApplyShading(t *testing.T) {
 		t.Fatalf("Failed to set palette: %v", err)
 	}
 
-	// Step 2: Draw a circle with mid-tone
-	circleScript := gen.DrawCircle("Layer 1", 1, 32, 32, 25, aseprite.Color{R: 195, G: 87, B: 54, A: 255}, true, false)
+	// Step 2: Draw a circle with an approximate mid-tone, snapped to the locked
+	// palette (this color is not one of the 16 exact palette entries).
+	circleScript := gen.DrawCircle("Layer 1", 1, 32, 32, 25, aseprite.Color{R: 195, G: 87, B: 54, A: 255}, true, true)
 	_, err = client.ExecuteLua(ctx, circleScript, spritePath)
 	if err != nil {
 		t.Fatalf("Failed to draw circle: %v", err)
