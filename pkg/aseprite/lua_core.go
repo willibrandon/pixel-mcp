@@ -30,13 +30,17 @@ func NewLuaGenerator() *LuaGenerator {
 // Always use this function when embedding user-provided strings in generated Lua code
 // to prevent script injection attacks.
 func EscapeString(s string) string {
+	// Strip null bytes
+	s = strings.ReplaceAll(s, "\x00", "")
+
 	// Replace backslashes first
 	s = strings.ReplaceAll(s, `\`, `\\`)
 
 	// Replace quotes
 	s = strings.ReplaceAll(s, `"`, `\"`)
+	s = strings.ReplaceAll(s, `'`, `\'`)
 
-	// Replace newlines
+	// Replace newlines and formatting
 	s = strings.ReplaceAll(s, "\n", `\n`)
 	s = strings.ReplaceAll(s, "\r", `\r`)
 	s = strings.ReplaceAll(s, "\t", `\t`)
@@ -91,34 +95,74 @@ func FormatColorWithPaletteForTool(c Color, usePalette bool) string {
 // palette using Euclidean color space distance.
 //
 // Include this helper at the start of scripts that use palette-aware drawing (use_palette=true).
+//
+// The palette is read into a Lua table on first use and each distinct input color's
+// result is memoized, so snapping N pixels costs one palette read plus one search per
+// distinct color instead of N*len(palette) palette:getColor calls. This assumes the
+// script does not modify the palette after the first snap, which holds for every
+// drawing script that includes this helper.
 func GeneratePaletteSnapperHelper() string {
 	return `
--- Helper: Find nearest palette index for given RGBA color
-local function findNearestPaletteIndex(r, g, b, a)
+-- Palette entries as {r, g, b, a}, read once on first use
+local snapPalette = nil
+-- Memoized nearest index per packed RGBA input color
+local snapMemo = {}
+
+local function loadSnapPalette()
+	snapPalette = {}
 	local spr = app.activeSprite
 	local palette = spr.palettes[1]
 	if not palette or #palette == 0 then
-		return 0
+		return
+	end
+	for i = 0, #palette - 1 do
+		local palColor = palette:getColor(i)
+		snapPalette[i] = {palColor.red, palColor.green, palColor.blue, palColor.alpha}
+	end
+end
+
+-- Helper: Find nearest palette index for given RGBA color
+local function findNearestPaletteIndex(r, g, b, a)
+	local key = ((r * 256 + g) * 256 + b) * 256 + a
+	local cached = snapMemo[key]
+	if cached then
+		return cached
+	end
+	if not snapPalette then
+		loadSnapPalette()
 	end
 
 	local minDist = math.huge
 	local nearestIndex = 0
 
-	for i = 0, #palette - 1 do
-		local palColor = palette:getColor(i)
-		local dr = r - palColor.red
-		local dg = g - palColor.green
-		local db = b - palColor.blue
-		local da = a - palColor.alpha
+	local i = 0
+	local entry = snapPalette[0]
+	while entry do
+		local dr = r - entry[1]
+		local dg = g - entry[2]
+		local db = b - entry[3]
+		local da = a - entry[4]
 		local dist = dr*dr + dg*dg + db*db + da*da
 
 		if dist < minDist then
 			minDist = dist
 			nearestIndex = i
 		end
+		i = i + 1
+		entry = snapPalette[i]
 	end
 
+	snapMemo[key] = nearestIndex
 	return nearestIndex
+end
+
+-- Helper: RGBA pixel value of a palette entry (transparent black if the palette is empty)
+local function snapPaletteRGBA(index)
+	local entry = snapPalette[index]
+	if not entry then
+		return app.pixelColor.rgba(0, 0, 0, 0)
+	end
+	return app.pixelColor.rgba(entry[1], entry[2], entry[3], entry[4])
 end
 
 -- Helper: Snap color for img:putPixel (returns palette index in indexed mode)
@@ -129,10 +173,7 @@ local function snapToPaletteForPixel(r, g, b, a)
 		return findNearestPaletteIndex(r, g, b, a)
 	else
 		-- In RGB/Grayscale, return pixel color
-		local nearestIndex = findNearestPaletteIndex(r, g, b, a)
-		local palette = spr.palettes[1]
-		local nearestColor = palette:getColor(nearestIndex)
-		return app.pixelColor.rgba(nearestColor.red, nearestColor.green, nearestColor.blue, nearestColor.alpha)
+		return snapPaletteRGBA(findNearestPaletteIndex(r, g, b, a))
 	end
 end
 
@@ -146,9 +187,7 @@ local function snapToPaletteForTool(r, g, b, a)
 		return nearestIndex
 	else
 		-- In RGB/Grayscale, app.useTool expects pixel color
-		local palette = spr.palettes[1]
-		local nearestColor = palette:getColor(nearestIndex)
-		return app.pixelColor.rgba(nearestColor.red, nearestColor.green, nearestColor.blue, nearestColor.alpha)
+		return snapPaletteRGBA(nearestIndex)
 	end
 end
 
@@ -190,4 +229,29 @@ func WrapInTransaction(code string) string {
 	return fmt.Sprintf(`app.transaction(function()
 %s
 end)`, code)
+}
+
+// NormalizeCelSnippet returns a Lua snippet that expands cel.image to the
+// full canvas dimensions and normalizes cel.position to Point(0, 0).
+//
+// Aseprite trims cels drawn with drawing tools (e.g. app.useTool with rectangle,
+// ellipse, line, or paint_bucket) to their non-empty content bounds. This results
+// in cel.position != (0, 0) and cel.image smaller than the sprite canvas. Direct
+// pixel operations (such as img:putPixel or img:drawPixel) that write at sprite
+// coordinates directly into cel.image would then offset the pixels or silently drop
+// writes falling outside the trimmed cel bounds.
+//
+// Normalizing copies the existing cel image into a full canvas-sized image positioned
+// at Point(0, 0), ensuring sprite coordinates directly match image coordinates.
+//
+// The returned snippet expects Lua locals 'spr' and 'cel' to be in scope.
+func NormalizeCelSnippet() string {
+	return `	local b = cel.bounds
+	if b.x ~= 0 or b.y ~= 0 or b.width ~= spr.width or b.height ~= spr.height then
+		local full = Image(spr.spec)
+		full:clear()
+		full:drawImage(cel.image, cel.position)
+		cel.image = full
+		cel.position = Point(0, 0)
+	end`
 }

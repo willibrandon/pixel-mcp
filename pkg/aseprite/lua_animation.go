@@ -281,6 +281,11 @@ if not srcCel then
 end
 
 app.transaction(function()
+	-- Delete existing cel if present to avoid collision
+	local existingCel = layer:cel(tgtFrame)
+	if existingCel then
+		spr:deleteCel(existingCel)
+	end
 	-- Create linked cel by copying with same image reference
 	spr:newCel(layer, tgtFrame, srcCel.image, srcCel.position)
 end)

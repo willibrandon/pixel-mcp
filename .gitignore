@@ -48,3 +48,11 @@ config.json
 # Pixel-MCP binaries
 /pixel-mcp
 cmd/pixel-mcp/pixel-mcp
+
+# Agent skills and lockfiles
+.agents/
+skills-lock.json
+
+# Scratch scripts
+generate_link*
+build_detailed_link_64.py

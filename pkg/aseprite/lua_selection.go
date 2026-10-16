@@ -38,13 +38,14 @@ local sel = Selection(rect)
 
 if "%s" == "replace" then
 	spr.selection = sel
-else
+elseif "%s" == "add" then
 	spr.selection:add(sel)
-	if "%s" == "subtract" then
-		spr.selection:subtract(sel)
-	elseif "%s" == "intersect" then
-		spr.selection:intersect(sel)
-	end
+elseif "%s" == "subtract" then
+	spr.selection:subtract(sel)
+elseif "%s" == "intersect" then
+	spr.selection:intersect(sel)
+else
+	spr.selection = sel
 end
 
 -- Persist selection state to sprite.data for cross-process persistence
@@ -55,7 +56,7 @@ if not spr.selection.isEmpty then
 	spr:saveAs(spr.filename)
 end
 
-print("Rectangle selection created successfully")`, x, y, width, height, mode, mode, mode)
+print("Rectangle selection created successfully")`, x, y, width, height, mode, mode, mode, mode)
 }
 
 // SelectEllipse generates a Lua script to create an elliptical selection.
@@ -87,29 +88,27 @@ if not spr then
 	error("No active sprite")
 end
 
--- Create ellipse selection by using drawPixel for each point on ellipse
+-- Create ellipse selection using scanline filling
 local sel = Selection()
-local rx = %d / 2
-local ry = %d / 2
+local rx = %d / 2.0
+local ry = %d / 2.0
 local cx = %d + rx
 local cy = %d + ry
 
--- Midpoint ellipse algorithm to create selection
-for angle = 0, 360 do
-	local rad = math.rad(angle)
-	local ex = math.floor(cx + rx * math.cos(rad))
-	local ey = math.floor(cy + ry * math.sin(rad))
-	-- Fill from center to edge
-	for fillx = math.floor(cx - rx), math.floor(cx + rx) do
-		for filly = math.floor(cy - ry), math.floor(cy + ry) do
-			local dx = (fillx - cx) / rx
-			local dy = (filly - cy) / ry
-			if dx * dx + dy * dy <= 1 then
-				sel:add(Rectangle(fillx, filly, 1, 1))
-			end
+local minY = math.floor(cy - ry)
+local maxY = math.floor(cy + ry)
+for py = minY, maxY do
+	local dy = (py + 0.5 - cy) / ry
+	local dy2 = dy * dy
+	if dy2 <= 1.0 then
+		local halfW = rx * math.sqrt(math.max(0.0, 1.0 - dy2))
+		local minX = math.floor(cx - halfW)
+		local maxX = math.floor(cx + halfW)
+		local spanW = maxX - minX + 1
+		if spanW > 0 then
+			sel:add(Rectangle(minX, py, spanW, 1))
 		end
 	end
-	break  -- Only need one pass to fill
 end
 
 if "%s" == "replace" then
@@ -486,11 +485,16 @@ end
 app.transaction(function()
 	local targetCel = layer:cel(frame)
 	if not targetCel then
-		targetCel = spr:newCel(layer, frame)
+		local newImg = Image(spr.width, spr.height, spr.colorMode)
+		targetCel = spr:newCel(layer, frame, newImg, Point(0, 0))
+	elseif not targetCel.image then
+		targetCel.image = Image(spr.width, spr.height, spr.colorMode)
 	end
 
 	-- Draw clipboard image onto target
-	targetCel.image:drawImage(clipCel.image, Point(pasteX - targetCel.position.x, pasteY - targetCel.position.y))
+	local celPosX = targetCel.position and targetCel.position.x or 0
+	local celPosY = targetCel.position and targetCel.position.y or 0
+	targetCel.image:drawImage(clipCel.image, Point(pasteX - celPosX, pasteY - celPosY))
 end)
 
 spr:saveAs(spr.filename)

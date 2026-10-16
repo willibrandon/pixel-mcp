@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Batch drawing tool** (`batch_draw`)
+  - Applies up to 1000 operations (pixels, line, rectangle, circle, contour, fill) in one Aseprite run, one transaction and one save
+  - Atomic: if any operation fails, the sprite file is left unchanged; errors name the failing `operations[i]`
+  - Per-operation `layer_name` / `frame_number` overrides, `use_palette`, optional `return_preview`
+  - 20 operations: ~626ms as separate calls vs ~82ms batched, before counting saved LLM round-trips
+- **Compact grid format for `get_pixels`** (`format: "grid"`)
+  - Returns a region of up to 16384 pixels as rows of single-character color keys plus a legend (`.` = transparent)
+  - A fully painted 16x16 region shrinks from ~8.9KB to ~0.4KB of tool output
+
+### Fixed
+- `draw_pixels` and `draw_with_dither` wrote to the wrong place on cels that Aseprite had trimmed after a shape tool (e.g. a pixel at (2,2) landed at (12,12) after a rectangle at (10,10)), and silently dropped pixels outside the trimmed bounds
+- `get_pixels` pagination never terminated on trimmed cels because `next_cursor` did not advance past skipped positions
+- `generate_color_ramp` and `apply_auto_shading` failures reached clients as JSON-RPC "validating tool output" errors instead of `isError` results
+
+### Performance
+- Palette snapping (`use_palette`) reads the palette once and memoizes lookups: 16384 snapped pixels ~600ms -> ~200ms; worst case at `batch_draw` limits 27.7s -> 2.3s
+
 ## [0.5.0] - 2025-10-18
 
 ### Added

@@ -26,11 +26,13 @@ type PixelInput struct {
 // for efficient bulk pixel operations. When UsePalette is true, colors are
 // snapped to the nearest palette color using LAB color space distance.
 type DrawPixelsInput struct {
-	SpritePath  string       `json:"sprite_path" jsonschema:"Path to the Aseprite sprite file"`                                // Path to the sprite file to modify
-	LayerName   string       `json:"layer_name" jsonschema:"Name of the layer to draw on"`                                     // Target layer name
-	FrameNumber int          `json:"frame_number" jsonschema:"Frame number to draw on (1-based)"`                              // 1-based frame index
-	Pixels      []PixelInput `json:"pixels" jsonschema:"Array of pixels to draw"`                                              // Pixels to draw with positions and colors
-	UsePalette  bool         `json:"use_palette,omitempty" jsonschema:"Snap colors to nearest palette color (default: false)"` // Snap to palette if true
+	SpritePath    string       `json:"sprite_path" jsonschema:"Path to the Aseprite sprite file"`
+	LayerName     string       `json:"layer_name" jsonschema:"Name of the layer to draw on"`
+	FrameNumber   int          `json:"frame_number" jsonschema:"Frame number to draw on (1-based)"`
+	Pixels        []PixelInput `json:"pixels" jsonschema:"Array of pixels to draw"`
+	MirrorX       *int         `json:"mirror_x,omitempty" jsonschema:"Optional X coordinate for bilateral symmetry. When set, each pixel at (x,y) is also drawn at (2*mirror_x - x, y)."`
+	ReturnPreview bool         `json:"return_preview,omitempty" jsonschema:"If true, returns a 4x visual PNG preview directly in the response"`
+	UsePalette    bool         `json:"use_palette,omitempty" jsonschema:"Snap colors to nearest palette color (default: false)"`
 }
 
 // DrawPixelsOutput defines the output for the draw_pixels tool.
@@ -162,28 +164,38 @@ func RegisterDrawingTools(server *mcp.Server, client *aseprite.Client, gen *asep
 
 			// Validate inputs
 			if input.LayerName == "" {
-				return nil, nil, fmt.Errorf("layer_name cannot be empty")
+				return ToolError[DrawPixelsOutput]("layer_name cannot be empty", nil)
 			}
 
 			if input.FrameNumber < 1 {
-				return nil, nil, fmt.Errorf("frame_number must be at least 1, got %d", input.FrameNumber)
+				return ToolError[DrawPixelsOutput](fmt.Sprintf("frame_number must be at least 1, got %d", input.FrameNumber), nil)
 			}
 
 			if len(input.Pixels) == 0 {
-				return nil, nil, fmt.Errorf("pixels array cannot be empty")
+				return ToolError[DrawPixelsOutput]("pixels array cannot be empty", nil)
 			}
 
-			// Convert pixel inputs to aseprite.Pixel types
-			pixels := make([]aseprite.Pixel, len(input.Pixels))
+			// Convert pixel inputs to aseprite.Pixel types with optional bilateral symmetry
+			var pixels []aseprite.Pixel
 			for i, p := range input.Pixels {
 				var color aseprite.Color
 				if err := color.FromHex(p.Color); err != nil {
-					return nil, nil, fmt.Errorf("invalid color format for pixel %d: %w", i, err)
+					return ToolError[DrawPixelsOutput](fmt.Sprintf("invalid color format for pixel %d", i), err)
 				}
 
-				pixels[i] = aseprite.Pixel{
+				pixels = append(pixels, aseprite.Pixel{
 					Point: aseprite.Point{X: p.X, Y: p.Y},
 					Color: color,
+				})
+
+				if input.MirrorX != nil {
+					mirroredX := 2*(*input.MirrorX) - p.X
+					if mirroredX != p.X {
+						pixels = append(pixels, aseprite.Pixel{
+							Point: aseprite.Point{X: mirroredX, Y: p.Y},
+							Color: color,
+						})
+					}
 				}
 			}
 
@@ -194,7 +206,7 @@ func RegisterDrawingTools(server *mcp.Server, client *aseprite.Client, gen *asep
 			output, err := client.ExecuteLua(ctx, script, input.SpritePath)
 			if err != nil {
 				opLogger.Error("Failed to draw pixels", "error", err)
-				return nil, nil, fmt.Errorf("failed to draw pixels: %w", err)
+				return ToolError[DrawPixelsOutput]("failed to draw pixels", err)
 			}
 
 			// Check for success message
@@ -204,7 +216,16 @@ func RegisterDrawingTools(server *mcp.Server, client *aseprite.Client, gen *asep
 
 			opLogger.Information("Pixels drawn successfully", "sprite", input.SpritePath, "layer", input.LayerName, "frame", input.FrameNumber, "count", len(pixels))
 
-			return nil, &DrawPixelsOutput{PixelsDrawn: len(pixels)}, nil
+			out := &DrawPixelsOutput{PixelsDrawn: len(pixels)}
+
+			if input.ReturnPreview {
+				imgBytes, err := client.ExportPreview(ctx, input.SpritePath, 4, input.FrameNumber, "")
+				if err == nil && len(imgBytes) > 0 {
+					return ToolSuccessWithImage(out, imgBytes, "image/png", fmt.Sprintf("Successfully drew %d pixels (with 4x preview)", len(pixels)))
+				}
+			}
+
+			return ToolSuccess(out)
 		}),
 	)
 

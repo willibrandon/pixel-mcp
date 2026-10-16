@@ -60,23 +60,10 @@ if not frame then
 end
 
 app.transaction(function()
-	local cel = layer:cel(frame)
-	if not cel then
-		cel = spr:newCel(layer, frame)
-	end
-
-	local img = cel.image
-`, escapedName, escapedName, frameNumber, frameNumber))
-
-	// Add pixel drawing commands
-	for _, p := range pixels {
-		sb.WriteString(fmt.Sprintf("\timg:putPixel(%d, %d, %s)\n", p.X, p.Y, FormatColorWithPalette(p.Color, usePalette)))
-	}
-
-	sb.WriteString(`end)
+%send)
 
 spr:saveAs(spr.filename)
-print("Pixels drawn successfully")`)
+print("Pixels drawn successfully")`, escapedName, escapedName, frameNumber, frameNumber, emitPixelsOp(pixels, usePalette)))
 
 	return sb.String()
 }
@@ -137,27 +124,14 @@ if not frame then
 end
 
 app.transaction(function()
-	app.activeLayer = layer
-	app.activeFrame = frame
-
-	local brush = Brush(%d)
-
-	app.useTool{
-		tool = "line",
-		color = %s,
-		brush = brush,
-		points = {%s, %s}
-	}
+%s
 end)
 
 spr:saveAs(spr.filename)
 print("Line drawn successfully")`,
 		escapedName, escapedName,
 		frameNumber, frameNumber,
-		thickness,
-		FormatColorWithPaletteForTool(color, usePalette),
-		FormatPoint(Point{X: x1, Y: y1}),
-		FormatPoint(Point{X: x2, Y: y2})))
+		emitLineOp(x1, y1, x2, y2, color, thickness, usePalette)))
 
 	return sb.String()
 }
@@ -221,50 +195,14 @@ if not frame then
 end
 
 app.transaction(function()
-	app.activeLayer = layer
-	app.activeFrame = frame
-
-	local brush = Brush(%d)
-	local color = %s
-
-	-- Draw lines connecting each point`,
-		escapedName, escapedName,
-		frameNumber, frameNumber,
-		thickness,
-		FormatColorWithPaletteForTool(color, usePalette)))
-
-	// Draw line segments between consecutive points
-	for i := 0; i < len(points)-1; i++ {
-		sb.WriteString(fmt.Sprintf(`
-	app.useTool{
-		tool = "line",
-		color = color,
-		brush = brush,
-		points = {%s, %s}
-	}`,
-			FormatPoint(points[i]),
-			FormatPoint(points[i+1])))
-	}
-
-	// If closed, connect last point back to first
-	if closed && len(points) > 0 {
-		sb.WriteString(fmt.Sprintf(`
-	-- Close the contour
-	app.useTool{
-		tool = "line",
-		color = color,
-		brush = brush,
-		points = {%s, %s}
-	}`,
-			FormatPoint(points[len(points)-1]),
-			FormatPoint(points[0])))
-	}
-
-	sb.WriteString(`
+%s
 end)
 
 spr:saveAs(spr.filename)
-print("Contour drawn successfully")`)
+print("Contour drawn successfully")`,
+		escapedName, escapedName,
+		frameNumber, frameNumber,
+		emitContourOp(points, color, thickness, closed, usePalette)))
 
 	return sb.String()
 }
@@ -302,10 +240,6 @@ func (g *LuaGenerator) DrawRectangle(layerName string, frameNumber int, x, y, wi
 	}
 
 	escapedName := EscapeString(layerName)
-	tool := "rectangle"
-	if filled {
-		tool = "filled_rectangle"
-	}
 
 	sb.WriteString(fmt.Sprintf(`local spr = app.activeSprite
 if not spr then
@@ -331,24 +265,14 @@ if not frame then
 end
 
 app.transaction(function()
-	app.activeLayer = layer
-	app.activeFrame = frame
-
-	app.useTool{
-		tool = "%s",
-		color = %s,
-		points = {%s, %s}
-	}
+%s
 end)
 
 spr:saveAs(spr.filename)
 print("Rectangle drawn successfully")`,
 		escapedName, escapedName,
 		frameNumber, frameNumber,
-		tool,
-		FormatColorWithPaletteForTool(color, usePalette),
-		FormatPoint(Point{X: x, Y: y}),
-		FormatPoint(Point{X: x + width - 1, Y: y + height - 1})))
+		emitRectangleOp(x, y, width, height, color, filled, usePalette)))
 
 	return sb.String()
 }
@@ -386,16 +310,6 @@ func (g *LuaGenerator) DrawCircle(layerName string, frameNumber int, centerX, ce
 	}
 
 	escapedName := EscapeString(layerName)
-	tool := "ellipse"
-	if filled {
-		tool = "filled_ellipse"
-	}
-
-	// Calculate bounding rectangle for circle
-	x1 := centerX - radius
-	y1 := centerY - radius
-	x2 := centerX + radius
-	y2 := centerY + radius
 
 	sb.WriteString(fmt.Sprintf(`local spr = app.activeSprite
 if not spr then
@@ -421,24 +335,14 @@ if not frame then
 end
 
 app.transaction(function()
-	app.activeLayer = layer
-	app.activeFrame = frame
-
-	app.useTool{
-		tool = "%s",
-		color = %s,
-		points = {%s, %s}
-	}
+%s
 end)
 
 spr:saveAs(spr.filename)
 print("Circle drawn successfully")`,
 		escapedName, escapedName,
 		frameNumber, frameNumber,
-		tool,
-		FormatColorWithPaletteForTool(color, usePalette),
-		FormatPoint(Point{X: x1, Y: y1}),
-		FormatPoint(Point{X: x2, Y: y2})))
+		emitCircleOp(centerX, centerY, radius, color, filled, usePalette)))
 
 	return sb.String()
 }
@@ -500,7 +404,154 @@ if not frame then
 end
 
 app.transaction(function()
-	app.activeLayer = layer
+%s
+end)
+
+spr:saveAs(spr.filename)
+print("Area filled successfully")`,
+		escapedName, escapedName,
+		frameNumber, frameNumber,
+		emitFillOp(x, y, color, tolerance, usePalette)))
+
+	return sb.String()
+}
+
+// emitPixelsOp emits the transaction body for drawing pixels directly to cel image.
+// Assumes Lua locals 'spr', 'layer', 'frame' are already in scope.
+func emitPixelsOp(pixels []Pixel, usePalette bool) string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf(`	local cel = layer:cel(frame)
+	if not cel then
+		cel = spr:newCel(layer, frame)
+	end
+
+%s
+
+	local img = cel.image
+`, NormalizeCelSnippet()))
+
+	// Add pixel drawing commands with bounds checking
+	for _, p := range pixels {
+		sb.WriteString(fmt.Sprintf("\tif %d >= 0 and %d < spr.width and %d >= 0 and %d < spr.height then\n\t\timg:putPixel(%d, %d, %s)\n\tend\n",
+			p.X, p.X, p.Y, p.Y, p.X, p.Y, FormatColorWithPalette(p.Color, usePalette)))
+	}
+
+	return sb.String()
+}
+
+// emitLineOp emits the transaction body for drawing a line.
+// Assumes Lua locals 'spr', 'layer', 'frame' are already in scope.
+func emitLineOp(x1, y1, x2, y2 int, color Color, thickness int, usePalette bool) string {
+	return fmt.Sprintf(`	app.activeLayer = layer
+	app.activeFrame = frame
+
+	local brush = Brush(%d)
+
+	app.useTool{
+		tool = "line",
+		color = %s,
+		brush = brush,
+		points = {%s, %s}
+	}`,
+		thickness,
+		FormatColorWithPaletteForTool(color, usePalette),
+		FormatPoint(Point{X: x1, Y: y1}),
+		FormatPoint(Point{X: x2, Y: y2}))
+}
+
+// emitContourOp emits the transaction body for drawing a contour.
+// Assumes Lua locals 'spr', 'layer', 'frame' are already in scope.
+func emitContourOp(points []Point, color Color, thickness int, closed bool, usePalette bool) string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf(`	app.activeLayer = layer
+	app.activeFrame = frame
+
+	local brush = Brush(%d)
+	local color = %s
+
+	-- Draw lines connecting each point`,
+		thickness,
+		FormatColorWithPaletteForTool(color, usePalette)))
+
+	for i := 0; i < len(points)-1; i++ {
+		sb.WriteString(fmt.Sprintf(`
+	app.useTool{
+		tool = "line",
+		color = color,
+		brush = brush,
+		points = {%s, %s}
+	}`,
+			FormatPoint(points[i]),
+			FormatPoint(points[i+1])))
+	}
+
+	if closed && len(points) > 0 {
+		sb.WriteString(fmt.Sprintf(`
+	-- Close the contour
+	app.useTool{
+		tool = "line",
+		color = color,
+		brush = brush,
+		points = {%s, %s}
+	}`,
+			FormatPoint(points[len(points)-1]),
+			FormatPoint(points[0])))
+	}
+
+	return sb.String()
+}
+
+// emitRectangleOp emits the transaction body for drawing a rectangle.
+// Assumes Lua locals 'spr', 'layer', 'frame' are already in scope.
+func emitRectangleOp(x, y, width, height int, color Color, filled bool, usePalette bool) string {
+	tool := "rectangle"
+	if filled {
+		tool = "filled_rectangle"
+	}
+	return fmt.Sprintf(`	app.activeLayer = layer
+	app.activeFrame = frame
+
+	app.useTool{
+		tool = "%s",
+		color = %s,
+		points = {%s, %s}
+	}`,
+		tool,
+		FormatColorWithPaletteForTool(color, usePalette),
+		FormatPoint(Point{X: x, Y: y}),
+		FormatPoint(Point{X: x + width - 1, Y: y + height - 1}))
+}
+
+// emitCircleOp emits the transaction body for drawing a circle/ellipse.
+// Assumes Lua locals 'spr', 'layer', 'frame' are already in scope.
+func emitCircleOp(centerX, centerY, radius int, color Color, filled bool, usePalette bool) string {
+	tool := "ellipse"
+	if filled {
+		tool = "filled_ellipse"
+	}
+	x1 := centerX - radius
+	y1 := centerY - radius
+	x2 := centerX + radius
+	y2 := centerY + radius
+
+	return fmt.Sprintf(`	app.activeLayer = layer
+	app.activeFrame = frame
+
+	app.useTool{
+		tool = "%s",
+		color = %s,
+		points = {%s, %s}
+	}`,
+		tool,
+		FormatColorWithPaletteForTool(color, usePalette),
+		FormatPoint(Point{X: x1, Y: y1}),
+		FormatPoint(Point{X: x2, Y: y2}))
+}
+
+// emitFillOp emits the transaction body for flood filling an area.
+// Assumes Lua locals 'spr', 'layer', 'frame' are already in scope.
+func emitFillOp(x, y int, color Color, tolerance int, usePalette bool) string {
+	return fmt.Sprintf(`	app.activeLayer = layer
 	app.activeFrame = frame
 
 	app.useTool{
@@ -509,16 +560,97 @@ app.transaction(function()
 		points = {%s},
 		contiguous = true,
 		tolerance = %d
-	}
-end)
-
-spr:saveAs(spr.filename)
-print("Area filled successfully")`,
-		escapedName, escapedName,
-		frameNumber, frameNumber,
+	}`,
 		FormatColorWithPaletteForTool(color, usePalette),
 		FormatPoint(Point{X: x, Y: y}),
-		tolerance))
+		tolerance)
+}
+
+// BatchDraw generates a Lua script to execute multiple drawing operations in a single transaction.
+//
+// All operations are executed atomically in the order provided within a single app.transaction.
+// The sprite is saved once after all operations complete. If any operation fails (e.g., layer or
+// frame not found), the script raises a Lua error naming the operation index (0-based) and the
+// failure reason, aborting the transaction and leaving the sprite file untouched.
+//
+// Parameters:
+//   - ops: slice of BatchOp structs, each with resolved layer name, frame number, and parameters
+//   - usePalette: if true, snaps colors to nearest palette color
+//
+// Prints "Batch completed: N operations" on success.
+func (g *LuaGenerator) BatchDraw(ops []BatchOp, usePalette bool) string {
+	var sb strings.Builder
+
+	if usePalette {
+		sb.WriteString(GeneratePaletteSnapperHelper())
+		sb.WriteString("\n")
+	}
+
+	sb.WriteString(`local spr = app.activeSprite
+if not spr then
+	error("No active sprite")
+end
+
+-- Helper to find layer by name with caching
+local layerCache = {}
+local function getLayer(name)
+	local lyr = layerCache[name]
+	if lyr then
+		return lyr
+	end
+	for _, l in ipairs(spr.layers) do
+		if l.name == name then
+			layerCache[name] = l
+			return l
+		end
+	end
+	return nil
+end
+
+app.transaction(function()
+`)
+
+	for i, op := range ops {
+		escapedLayer := EscapeString(op.LayerName)
+		sb.WriteString(fmt.Sprintf(`	do
+		local layer = getLayer("%s")
+		if not layer then
+			error("operations[%d]: Layer not found: %s")
+		end
+		local frame = spr.frames[%d]
+		if not frame then
+			error("operations[%d]: Frame not found: %d")
+		end
+
+`, escapedLayer, i, escapedLayer, op.FrameNumber, i, op.FrameNumber))
+
+		var opLua string
+		switch op.Type {
+		case BatchOpPixels:
+			opLua = emitPixelsOp(op.Pixels, usePalette)
+		case BatchOpLine:
+			opLua = emitLineOp(op.X1, op.Y1, op.X2, op.Y2, op.Color, op.Thickness, usePalette)
+		case BatchOpRectangle:
+			opLua = emitRectangleOp(op.X, op.Y, op.Width, op.Height, op.Color, op.Filled, usePalette)
+		case BatchOpCircle:
+			opLua = emitCircleOp(op.CenterX, op.CenterY, op.Radius, op.Color, op.Filled, usePalette)
+		case BatchOpContour:
+			opLua = emitContourOp(op.Points, op.Color, op.Thickness, op.Closed, usePalette)
+		case BatchOpFill:
+			opLua = emitFillOp(op.X, op.Y, op.Color, op.Tolerance, usePalette)
+		}
+
+		sb.WriteString(opLua)
+		if !strings.HasSuffix(opLua, "\n") {
+			sb.WriteString("\n")
+		}
+		sb.WriteString("\tend\n")
+	}
+
+	sb.WriteString(fmt.Sprintf(`end)
+
+spr:saveAs(spr.filename)
+print("Batch completed: %d operations")`, len(ops)))
 
 	return sb.String()
 }
@@ -725,19 +857,6 @@ if not frame then
 	error("Frame not found: %d")
 end
 
--- Get or create cel
-local cel = layer:cel(frame)
-if not cel then
-	cel = spr:newCel(layer, frame)
-end
-
--- Create or get image
-local img = cel.image
-if not img then
-	img = Image(spr.width, spr.height, spr.colorMode)
-	cel.image = img
-end
-
 -- Helper: Find nearest palette index for given RGBA color
 local function findNearestPaletteIndex(r, g, b, a)
 	local palette = spr.palettes[1]
@@ -785,16 +904,29 @@ local threshold = %f * (matrixSize * matrixSize)
 
 -- Apply dithering pattern
 app.transaction(function()
+	local cel = layer:cel(frame)
+	if not cel then
+		cel = spr:newCel(layer, frame)
+	end
+
+%s
+
+	local img = cel.image
+
 	for py = 0, %d - 1 do
 		for px = 0, %d - 1 do
-			local mx = (px %% matrixSize) + 1
-			local my = (py %% matrixSize) + 1
-			local matrixValue = matrix[my][mx]
+			local drawX = %d + px
+			local drawY = %d + py
+			if drawX >= 0 and drawX < spr.width and drawY >= 0 and drawY < spr.height then
+				local mx = (px %% matrixSize) + 1
+				local my = (py %% matrixSize) + 1
+				local matrixValue = matrix[my][mx]
 
-			local useColor2 = matrixValue < threshold
-			local finalColor = useColor2 and color2 or color1
+				local useColor2 = matrixValue < threshold
+				local finalColor = useColor2 and color2 or color1
 
-			img:drawPixel(%d + px, %d + py, finalColor)
+				img:drawPixel(drawX, drawY, finalColor)
+			end
 		end
 	end
 end)
@@ -809,6 +941,7 @@ print("Dithering applied successfully")`,
 		c2.R, c2.G, c2.B, c2.A,
 		matrixCode,
 		density,
+		NormalizeCelSnippet(),
 		height, width,
 		x, y)
 }
@@ -849,19 +982,6 @@ end
 local frame = spr.frames[%d]
 if not frame then
 	error("Frame not found: %d")
-end
-
--- Get or create cel
-local cel = layer:cel(frame)
-if not cel then
-	cel = spr:newCel(layer, frame)
-end
-
--- Create or get image
-local img = cel.image
-if not img then
-	img = Image(spr.width, spr.height, spr.colorMode)
-	cel.image = img
 end
 
 -- Helper: Find nearest palette index for given RGBA color
@@ -908,6 +1028,15 @@ end
 
 -- Floyd-Steinberg error diffusion
 app.transaction(function()
+	local cel = layer:cel(frame)
+	if not cel then
+		cel = spr:newCel(layer, frame)
+	end
+
+%s
+
+	local img = cel.image
+
 	-- Create error buffer (width+2 to handle edges, 2 rows for current and next)
 	local errors = {}
 	for row = 0, 1 do
@@ -1028,7 +1157,11 @@ app.transaction(function()
 				end
 			end
 
-			img:drawPixel(%d + px, %d + py, targetColor)
+			local drawX = %d + px
+			local drawY = %d + py
+			if drawX >= 0 and drawX < spr.width and drawY >= 0 and drawY < spr.height then
+				img:drawPixel(drawX, drawY, targetColor)
+			end
 		end
 	end
 end)
@@ -1039,18 +1172,19 @@ print("Dithering applied successfully")`,
 		frameNumber, frameNumber,
 		c1.R, c1.G, c1.B, c1.A,
 		c2.R, c2.G, c2.B, c2.A,
-		width,  // line 915: error buffer width
-		height, // line 920: py loop
-		width,  // line 925: clear buffer width
-		width,  // line 930: px loop
-		width,  // line 933: width check for division by zero
-		width,  // line 936: gradient calculation
-		width,  // line 967: right neighbor check
-		height, // line 972: bottom neighbor check
-		width,  // line 981: bottom-right check
-		width,  // line 1007: right neighbor check (RGB)
-		height, // line 1012: bottom neighbor check (RGB)
-		width,  // line 1021: bottom-right check (RGB)
-		x,      // line 1031: x coordinate
-		y)      // line 1031: y coordinate
+		NormalizeCelSnippet(),
+		width,  // error buffer width
+		height, // py loop
+		width,  // clear buffer width
+		width,  // px loop
+		width,  // width check for division by zero
+		width,  // gradient calculation
+		width,  // right neighbor check
+		height, // bottom neighbor check
+		width,  // bottom-right check
+		width,  // right neighbor check (RGB)
+		height, // bottom neighbor check (RGB)
+		width,  // bottom-right check (RGB)
+		x,      // drawX coordinate
+		y)      // drawY coordinate
 }

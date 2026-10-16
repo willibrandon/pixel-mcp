@@ -29,6 +29,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -42,11 +43,12 @@ import (
 // CreateCanvasInput defines the input parameters for the create_canvas tool.
 //
 // Creates a new sprite file with the specified dimensions and color mode.
-// The sprite is saved as a .aseprite file in the configured temp directory.
+// The sprite is saved as a .aseprite file in the configured temp directory or custom output path.
 type CreateCanvasInput struct {
-	Width     int    `json:"width" jsonschema:"Canvas width in pixels (1-65535)"`            // Sprite width in pixels (1-65535)
-	Height    int    `json:"height" jsonschema:"Canvas height in pixels (1-65535)"`          // Sprite height in pixels (1-65535)
-	ColorMode string `json:"color_mode" jsonschema:"Color mode: rgb, grayscale, or indexed"` // Color mode: "rgb", "grayscale", or "indexed"
+	Width      int    `json:"width" jsonschema:"Canvas width in pixels (1-65535)"`
+	Height     int    `json:"height" jsonschema:"Canvas height in pixels (1-65535)"`
+	ColorMode  string `json:"color_mode" jsonschema:"Color mode: rgb, grayscale, or indexed"`
+	OutputPath string `json:"output_path,omitempty" jsonschema:"Optional custom destination path for the created .aseprite file. If omitted, saves to temp directory."`
 }
 
 // CreateCanvasOutput defines the output for the create_canvas tool.
@@ -139,11 +141,18 @@ func RegisterCanvasTools(server *mcp.Server, client *aseprite.Client, gen *asepr
 			case "indexed":
 				colorMode = aseprite.ColorModeIndexed
 			default:
-				return nil, nil, fmt.Errorf("invalid color mode: %s (must be rgb, grayscale, or indexed)", input.ColorMode)
+				return ToolError[CreateCanvasOutput](fmt.Sprintf("invalid color mode: %s (must be rgb, grayscale, or indexed)", input.ColorMode), nil)
 			}
 
-			// Generate filename in temp directory
-			filename := filepath.Join(cfg.TempDir, fmt.Sprintf("sprite-%d.aseprite", generateTimestamp()))
+			// Generate filename
+			filename := input.OutputPath
+			if filename == "" {
+				filename = filepath.Join(cfg.TempDir, fmt.Sprintf("sprite-%d.aseprite", generateTimestamp()))
+			} else {
+				if dir := filepath.Dir(filename); dir != "" {
+					_ = os.MkdirAll(dir, 0755)
+				}
+			}
 
 			// Generate Lua script
 			script := gen.CreateCanvas(input.Width, input.Height, colorMode, filename)
@@ -152,7 +161,7 @@ func RegisterCanvasTools(server *mcp.Server, client *aseprite.Client, gen *asepr
 			output, err := client.ExecuteLua(ctx, script, "")
 			if err != nil {
 				opLogger.Error("Failed to create canvas", "error", err)
-				return nil, nil, fmt.Errorf("failed to create canvas: %w", err)
+				return ToolError[CreateCanvasOutput]("failed to create canvas", err)
 			}
 
 			// Parse output to get file path
@@ -160,7 +169,7 @@ func RegisterCanvasTools(server *mcp.Server, client *aseprite.Client, gen *asepr
 
 			opLogger.Debug("Canvas created successfully", "path", filePath, "width", input.Width, "height", input.Height)
 
-			return nil, &CreateCanvasOutput{FilePath: filePath}, nil
+			return ToolSuccess(&CreateCanvasOutput{FilePath: filePath})
 		}),
 	)
 

@@ -1,21 +1,11 @@
 // Package config provides configuration management for the Aseprite MCP server.
 //
-// Configuration is loaded exclusively from a JSON file at ~/.config/pixel-mcp/config.json.
-// No environment variables or auto-discovery mechanisms are used - all paths must be
-// explicitly configured.
-//
-// Example config file:
-//
-//	{
-//	  "aseprite_path": "/absolute/path/to/aseprite",
-//	  "temp_dir": "/tmp/pixel-mcp",
-//	  "timeout": 30,
-//	  "log_level": "info",
-//	  "log_file": "",
-//	  "enable_timing": false
-//	}
-//
-// The aseprite_path field is required and must point to a real Aseprite executable.
+// Configuration is layered in the following priority order:
+//  1. CLI flags / programmatic options
+//  2. Environment variables (PIXEL_MCP_*)
+//  3. Configuration file ($PIXEL_MCP_CONFIG, $XDG_CONFIG_HOME/pixel-mcp/config.json, or ~/.config/pixel-mcp/config.json)
+//  4. System PATH auto-discovery for Aseprite binary
+//  5. Built-in defaults
 package config
 
 import (
@@ -23,22 +13,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 )
 
 // Config holds the Aseprite MCP server configuration.
-//
-// All fields must be explicitly set in the config file, except:
-//   - TempDir defaults to /tmp/pixel-mcp if not specified
-//   - Timeout defaults to 30 seconds if not specified
-//   - LogLevel defaults to "info" if not specified
-//   - LogFile defaults to empty (stderr only) if not specified
-//   - EnableTiming defaults to false if not specified
-//
-// The AsepritePath is REQUIRED and must be an absolute path to a real executable.
 type Config struct {
-	// AsepritePath is the absolute path to the Aseprite executable.
-	// REQUIRED. Must point to a real, executable file.
+	// AsepritePath is the path to the Aseprite executable.
 	AsepritePath string `json:"aseprite_path"`
 
 	// TempDir is the directory for temporary Lua script files.
@@ -56,50 +38,107 @@ type Config struct {
 
 	// LogFile is the optional path to a log file for persistent logging.
 	// If empty, logs only go to stderr.
-	// Defaults to empty string if not specified.
 	LogFile string `json:"log_file"`
 
 	// EnableTiming enables request tracking and operation timing for all tools.
-	// When enabled, each operation gets a unique request ID and duration is logged.
-	// Defaults to false if not specified.
 	EnableTiming bool `json:"enable_timing"`
 }
 
-// Default configuration values applied when fields are not specified in the config file.
+// Default configuration values.
 const (
-	// DefaultTimeout is the default maximum duration for Aseprite operations (30 seconds)
-	DefaultTimeout = 30 * time.Second
-
-	// DefaultLogLevel is the default logging verbosity ("info")
+	DefaultTimeout  = 30 * time.Second
 	DefaultLogLevel = "info"
 )
 
-// Load loads configuration from the default config file at ~/.config/pixel-mcp/config.json.
-//
-// The config file MUST exist and MUST contain an explicit aseprite_path field.
-// No environment variables or auto-discovery mechanisms are used.
-//
-// Returns an error if:
-//   - Config file doesn't exist
-//   - Config file is malformed JSON
-//   - aseprite_path is not set
-//   - aseprite_path doesn't point to a real executable
-//   - Validation fails for any other field
+// Options allows overriding configuration parameters directly from CLI flags.
+type Options struct {
+	ConfigFile   string
+	AsepritePath string
+	TempDir      string
+	Timeout      time.Duration
+	LogLevel     string
+	LogFile      string
+	EnableTiming *bool
+}
+
+// Load loads configuration from default or environment-configured sources.
 func Load() (*Config, error) {
+	return LoadWithOptions(Options{})
+}
+
+// LoadWithOptions loads configuration with optional CLI flag overrides.
+func LoadWithOptions(opts Options) (*Config, error) {
 	cfg := &Config{
 		Timeout:  DefaultTimeout,
 		LogLevel: DefaultLogLevel,
 	}
 
-	// Try to load from config file
-	if err := cfg.loadFromFile(); err != nil {
-		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("config file not found at %s: %w\nPlease create config file with aseprite_path configured", getConfigFilePath(), err)
+	configPath := opts.ConfigFile
+	if configPath == "" {
+		if envConfig := os.Getenv("PIXEL_MCP_CONFIG"); envConfig != "" {
+			configPath = envConfig
+		} else {
+			configPath = getConfigFilePath()
 		}
-		return nil, fmt.Errorf("failed to load config file: %w", err)
 	}
 
-	// Set defaults for unset values
+	// Try to load from config file
+	err := cfg.loadFromPath(configPath)
+	if err != nil {
+		hasExplicitAseprite := opts.AsepritePath != "" || os.Getenv("PIXEL_MCP_ASEPRITE_PATH") != ""
+		if !hasExplicitAseprite || opts.ConfigFile != "" {
+			if os.IsNotExist(err) {
+				return nil, fmt.Errorf("config file not found at %s: %w\nPlease create config file with aseprite_path configured", configPath, err)
+			}
+			return nil, fmt.Errorf("failed to load config file: %w", err)
+		}
+	}
+
+	// Apply Environment Variables (PIXEL_MCP_*)
+	if envAse := os.Getenv("PIXEL_MCP_ASEPRITE_PATH"); envAse != "" {
+		cfg.AsepritePath = envAse
+	}
+	if envTemp := os.Getenv("PIXEL_MCP_TEMP_DIR"); envTemp != "" {
+		cfg.TempDir = envTemp
+	}
+	if envTimeout := os.Getenv("PIXEL_MCP_TIMEOUT"); envTimeout != "" {
+		if sec, err := strconv.Atoi(envTimeout); err == nil && sec > 0 {
+			cfg.Timeout = time.Duration(sec) * time.Second
+		}
+	}
+	if envLog := os.Getenv("PIXEL_MCP_LOG_LEVEL"); envLog != "" {
+		cfg.LogLevel = strings.ToLower(envLog)
+	}
+	if envLogFile := os.Getenv("PIXEL_MCP_LOG_FILE"); envLogFile != "" {
+		cfg.LogFile = envLogFile
+	}
+	if envTiming := os.Getenv("PIXEL_MCP_ENABLE_TIMING"); envTiming != "" {
+		if b, err := strconv.ParseBool(envTiming); err == nil {
+			cfg.EnableTiming = b
+		}
+	}
+
+	// Apply CLI flag overrides (highest priority)
+	if opts.AsepritePath != "" {
+		cfg.AsepritePath = opts.AsepritePath
+	}
+	if opts.TempDir != "" {
+		cfg.TempDir = opts.TempDir
+	}
+	if opts.Timeout > 0 {
+		cfg.Timeout = opts.Timeout
+	}
+	if opts.LogLevel != "" {
+		cfg.LogLevel = opts.LogLevel
+	}
+	if opts.LogFile != "" {
+		cfg.LogFile = opts.LogFile
+	}
+	if opts.EnableTiming != nil {
+		cfg.EnableTiming = *opts.EnableTiming
+	}
+
+	// Set defaults and auto-discovery
 	if err := cfg.setDefaults(); err != nil {
 		return nil, fmt.Errorf("failed to set defaults: %w", err)
 	}
@@ -112,75 +151,59 @@ func Load() (*Config, error) {
 	return cfg, nil
 }
 
-// configJSON is a temporary struct for unmarshaling JSON with timeout as int (seconds)
+func (c *Config) loadFromFile() error {
+	return c.loadFromPath(getConfigFilePath())
+}
+
+func (c *Config) loadFromPath(configPath string) error {
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return err
+	}
+	var cj configJSON
+	if err := json.Unmarshal(data, &cj); err != nil {
+		return err
+	}
+	c.AsepritePath = cj.AsepritePath
+	c.TempDir = cj.TempDir
+	if cj.Timeout > 0 {
+		c.Timeout = time.Duration(cj.Timeout) * time.Second
+	}
+	if cj.LogLevel != "" {
+		c.LogLevel = cj.LogLevel
+	}
+	c.LogFile = cj.LogFile
+	c.EnableTiming = cj.EnableTiming
+	return nil
+}
+
 type configJSON struct {
 	AsepritePath string `json:"aseprite_path"`
 	TempDir      string `json:"temp_dir"`
-	Timeout      int    `json:"timeout"` // timeout in seconds
+	Timeout      int    `json:"timeout"`
 	LogLevel     string `json:"log_level"`
 	LogFile      string `json:"log_file"`
 	EnableTiming bool   `json:"enable_timing"`
 }
 
-// loadFromFile loads configuration from the default config file location.
-func (c *Config) loadFromFile() error {
-	configPath := getConfigFilePath()
-
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		return err
-	}
-
-	// Unmarshal into temporary struct
-	var cj configJSON
-	if err := json.Unmarshal(data, &cj); err != nil {
-		return err
-	}
-
-	// Convert to Config with proper timeout conversion
-	c.AsepritePath = cj.AsepritePath
-	c.TempDir = cj.TempDir
-	c.Timeout = time.Duration(cj.Timeout) * time.Second
-	c.LogLevel = cj.LogLevel
-	c.LogFile = cj.LogFile
-	c.EnableTiming = cj.EnableTiming
-
-	return nil
-}
-
-// setDefaults sets default values for unset configuration fields.
-//
-// This method is called after loading from file to fill in any missing values.
-// The aseprite_path field MUST be explicitly set and cannot be defaulted.
-//
-// Defaults applied:
-//   - TempDir: /tmp/pixel-mcp (or OS temp dir + "pixel-mcp")
-//   - Timeout: 30 seconds
-//   - LogLevel: "info"
-//
-// Also creates the temp directory if it doesn't exist.
 func (c *Config) setDefaults() error {
-	// Aseprite path must be explicitly set in config file
 	if c.AsepritePath == "" {
 		return fmt.Errorf("aseprite_path must be explicitly configured in config file")
 	}
 
-	// Set default temp directory if not configured
+	// Set default temp directory
 	if c.TempDir == "" {
 		c.TempDir = filepath.Join(os.TempDir(), "pixel-mcp")
 	}
 
-	// Ensure temp directory exists
 	if err := os.MkdirAll(c.TempDir, 0755); err != nil {
 		return fmt.Errorf("failed to create temp directory: %w", err)
 	}
 
-	// Set default timeout if not set
-	if c.Timeout == 0 {
+	if c.Timeout <= 0 {
 		c.Timeout = DefaultTimeout
 	}
 
-	// Set default log level if not set
 	if c.LogLevel == "" {
 		c.LogLevel = DefaultLogLevel
 	}
@@ -189,34 +212,21 @@ func (c *Config) setDefaults() error {
 }
 
 // Validate checks if the configuration is valid and usable.
-//
-// Validation checks:
-//   - Aseprite executable exists at the configured path
-//   - Temp directory is writable
-//   - Timeout is positive
-//   - LogLevel is one of: debug, info, warn, error
-//
-// Returns an error if any validation check fails.
-// This method is automatically called by Load() before returning the config.
 func (c *Config) Validate() error {
-	// Check if Aseprite executable exists
 	if _, err := os.Stat(c.AsepritePath); os.IsNotExist(err) {
 		return fmt.Errorf("aseprite executable not found at %s", c.AsepritePath)
 	}
 
-	// Check if temp directory is writable
-	testFile := filepath.Join(c.TempDir, ".test")
+	testFile := filepath.Join(c.TempDir, fmt.Sprintf(".test-%d", time.Now().UnixNano()))
 	if err := os.WriteFile(testFile, []byte("test"), 0644); err != nil {
 		return fmt.Errorf("temp directory is not writable: %w", err)
 	}
-	os.Remove(testFile)
+	_ = os.Remove(testFile)
 
-	// Validate timeout
 	if c.Timeout <= 0 {
 		return fmt.Errorf("timeout must be positive, got %v", c.Timeout)
 	}
 
-	// Validate log level
 	validLevels := map[string]bool{
 		"debug": true,
 		"info":  true,
@@ -230,9 +240,13 @@ func (c *Config) Validate() error {
 	return nil
 }
 
-// getConfigFilePath is a function variable that returns the default config file path.
-// Can be overridden in tests.
 var getConfigFilePath = func() string {
-	homeDir, _ := os.UserHomeDir()
+	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
+		return filepath.Join(xdg, "pixel-mcp", "config.json")
+	}
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return filepath.Join(".config", "pixel-mcp", "config.json")
+	}
 	return filepath.Join(homeDir, ".config", "pixel-mcp", "config.json")
 }

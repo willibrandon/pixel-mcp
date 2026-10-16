@@ -12,6 +12,7 @@ import (
 	"github.com/willibrandon/mtlog"
 	"github.com/willibrandon/mtlog/core"
 	"github.com/willibrandon/mtlog/sinks"
+	"github.com/willibrandon/pixel-mcp/pkg/aseprite"
 	"github.com/willibrandon/pixel-mcp/pkg/config"
 	"github.com/willibrandon/pixel-mcp/pkg/server"
 )
@@ -25,9 +26,16 @@ var (
 func main() {
 	// Parse command-line flags
 	var (
-		showVersion = flag.Bool("version", false, "Show version information")
-		showHealth  = flag.Bool("health", false, "Check health and exit")
-		debugMode   = flag.Bool("debug", false, "Enable debug logging")
+		showVersion   = flag.Bool("version", false, "Show version information")
+		showHealth    = flag.Bool("health", false, "Check health and exit")
+		debugMode     = flag.Bool("debug", false, "Enable debug logging")
+		configFile    = flag.String("config", "", "Path to JSON configuration file")
+		asepritePath  = flag.String("aseprite-path", "", "Path to Aseprite binary")
+		tempDir       = flag.String("temp-dir", "", "Directory for temporary files")
+		timeoutSec    = flag.Int("timeout", 0, "Execution timeout in seconds")
+		logLevel      = flag.String("log-level", "", "Log level (debug, info, warn, error)")
+		logFile       = flag.String("log-file", "", "Log file path")
+		enableTiming  = flag.Bool("enable-timing", false, "Enable request timing")
 	)
 	flag.Parse()
 
@@ -37,17 +45,25 @@ func main() {
 		os.Exit(0)
 	}
 
+	opts := config.Options{
+		ConfigFile:   *configFile,
+		AsepritePath: *asepritePath,
+		TempDir:      *tempDir,
+		LogLevel:     *logLevel,
+		LogFile:      *logFile,
+	}
+	if *timeoutSec > 0 {
+		opts.Timeout = time.Duration(*timeoutSec) * time.Second
+	}
+	if flag.Lookup("enable-timing") != nil && *enableTiming {
+		opts.EnableTiming = enableTiming
+	}
+
 	// Load configuration
-	cfg, err := config.Load()
+	cfg, err := config.LoadWithOptions(opts)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to load configuration: %v\n", err)
-		fmt.Fprintf(os.Stderr, "\nPlease create a config file at ~/.config/pixel-mcp/config.json:\n")
-		fmt.Fprintf(os.Stderr, "{\n")
-		fmt.Fprintf(os.Stderr, "  \"aseprite_path\": \"/path/to/aseprite\",\n")
-		fmt.Fprintf(os.Stderr, "  \"temp_dir\": \"/tmp/pixel-mcp\",\n")
-		fmt.Fprintf(os.Stderr, "  \"timeout\": 30,\n")
-		fmt.Fprintf(os.Stderr, "  \"log_level\": \"info\"\n")
-		fmt.Fprintf(os.Stderr, "}\n")
+		fmt.Fprintf(os.Stderr, "\nPlease configure ~/.config/pixel-mcp/config.json, use --config / --aseprite-path, or ensure aseprite is in PATH.\n")
 		os.Exit(1)
 	}
 
@@ -58,12 +74,12 @@ func main() {
 
 	// Initialize logger
 	logger := createLogger(cfg.LogLevel, cfg.LogFile)
-	defer closeLogger(logger) // Ensure logs are flushed on shutdown
+	defer closeLogger(logger)
 
 	// Health check mode
 	if *showHealth {
 		exitCode := performHealthCheck(cfg, logger)
-		closeLogger(logger) // Flush logs before exit
+		closeLogger(logger)
 		os.Exit(exitCode)
 	}
 
@@ -75,7 +91,7 @@ func main() {
 	srv, err := server.New(cfg, logger)
 	if err != nil {
 		logger.Fatal("Failed to create server: {Error}", err)
-		closeLogger(logger) // Flush logs before exit
+		closeLogger(logger)
 		os.Exit(1)
 	}
 
@@ -98,12 +114,18 @@ func main() {
 	case sig := <-sigChan:
 		logger.Information("Received shutdown signal: {Signal}", sig)
 		cancel()
-		// Give server time to shutdown gracefully
-		time.Sleep(100 * time.Millisecond)
+		select {
+		case err := <-errChan:
+			if err != nil && err != context.Canceled {
+				logger.Error("Server shutdown with error: {Error}", err)
+			}
+		case <-time.After(2 * time.Second):
+			logger.Warning("Server shutdown timed out")
+		}
 	case err := <-errChan:
 		if err != nil {
 			logger.Error("Server error: {Error}", err)
-			closeLogger(logger) // Flush logs before exit
+			closeLogger(logger)
 			os.Exit(1)
 		}
 	}
@@ -113,20 +135,15 @@ func main() {
 
 // closeLogger closes the logger and flushes any buffered logs.
 func closeLogger(logger core.Logger) {
-	// Type assert to access Close() method on concrete logger type
 	if closer, ok := logger.(interface{ Close() error }); ok {
-		_ = closer.Close() // Ignore close errors
+		_ = closer.Close()
 	}
 }
 
 // createLogger creates a configured logger instance.
 func createLogger(logLevel string, logFilePath string) core.Logger {
-	// Create console sink with custom template and Literate theme
-	// Template: [HH:mm:ss LEVEL] Context: Message (Properties when in debug mode)
-	// Output to stderr since stdout is used for MCP communication
 	template := "[${Timestamp:HH:mm:ss} ${Level:u3}] {SourceContext}: ${Message}"
 	if logLevel == "debug" {
-		// In debug mode, show enriched properties like machine name, process
 		template = "[${Timestamp:HH:mm:ss} ${Level:u3}] {SourceContext} [{MachineName}/{ProcessName}:{ProcessId}]: ${Message}"
 	}
 	consoleSink, err := sinks.NewConsoleSinkWithTemplateAndTheme(
@@ -134,104 +151,78 @@ func createLogger(logLevel string, logFilePath string) core.Logger {
 		sinks.LiterateTheme(),
 	)
 	if err != nil {
-		// Fallback to simple console if template fails
 		consoleSink = sinks.NewConsoleSink()
 	}
-	// Redirect output to stderr (stdout is used for MCP communication)
 	consoleSink.SetOutput(os.Stderr)
 
-	// Create logger with options based on log level
 	var opts []mtlog.Option
 	opts = append(opts, mtlog.WithSink(consoleSink))
 
-	// Add file logging if path provided
 	if logFilePath != "" {
-		// Create rolling file sink for production use
-		// Rolls daily or at 100MB, keeps 7 days of logs
-		// BufferSize: 1 for near-immediate writes (values <=0 default to 64KB)
 		fileSink, err := sinks.NewRollingFileSink(sinks.RollingFileOptions{
 			FilePath:        logFilePath,
-			MaxFileSize:     100 * 1024 * 1024, // 100MB
+			MaxFileSize:     100 * 1024 * 1024,
 			RollingInterval: sinks.RollingIntervalDaily,
-			RetainFileCount: 7, // Keep last 7 days
-			BufferSize:      1, // Minimum buffer for near-immediate writes
+			RetainFileCount: 7,
+			BufferSize:      1,
 		})
-		if err != nil {
-			// Log error but continue with console only
-			fmt.Fprintf(os.Stderr, "Warning: Failed to create log file sink: %v\n", err)
-		} else {
+		if err == nil {
 			opts = append(opts, mtlog.WithSink(fileSink))
 		}
 	}
 
 	switch logLevel {
 	case "debug":
-		opts = append(opts, mtlog.WithMinimumLevel(core.DebugLevel))
+		opts = append(opts, mtlog.Debug())
 	case "info":
-		opts = append(opts, mtlog.WithMinimumLevel(core.InformationLevel))
+		opts = append(opts, mtlog.Information())
 	case "warn":
-		opts = append(opts, mtlog.WithMinimumLevel(core.WarningLevel))
+		opts = append(opts, mtlog.Warning())
 	case "error":
-		opts = append(opts, mtlog.WithMinimumLevel(core.ErrorLevel))
+		opts = append(opts, mtlog.Error())
 	default:
-		opts = append(opts, mtlog.WithMinimumLevel(core.InformationLevel))
+		opts = append(opts, mtlog.Information())
 	}
 
-	// Add enrichers for better context and debugging
-	opts = append(opts, mtlog.WithSourceContext("AsepriteMCP"))
-	opts = append(opts, mtlog.WithMachineName()) // Add machine name
-	opts = append(opts, mtlog.WithProcess())     // Add process ID and executable
-	opts = append(opts, mtlog.WithTimestamp())   // Ensure timestamps are included
-
-	// Add deadline awareness - warn when operations approach timeout
-	// Since most operations have 30s timeout, warn at 5s remaining
-	opts = append(opts, mtlog.WithContextDeadlineWarning(5*time.Second))
-
-	// Create logger
-	logger := mtlog.New(opts...)
-
-	return logger
+	return mtlog.New(opts...)
 }
 
-// performHealthCheck checks if Aseprite is accessible and returns exit code.
 func performHealthCheck(cfg *config.Config, logger core.Logger) int {
-	logger.Information("Performing health check...")
+	fmt.Println("Running pixel-mcp health checks...")
 
-	// Check if Aseprite executable exists
+	fmt.Printf("[1/3] Checking Aseprite executable at: %s\n", cfg.AsepritePath)
 	if _, err := os.Stat(cfg.AsepritePath); os.IsNotExist(err) {
-		logger.Error("Health check failed: Aseprite executable not found at {Path}", cfg.AsepritePath)
+		fmt.Printf("      FAIL: Aseprite not found at %s\n", cfg.AsepritePath)
 		return 1
 	}
 
-	logger.Information("✓ Aseprite executable found at {Path}", cfg.AsepritePath)
-
-	// Try to get Aseprite version
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	client := aseprite.NewClient(cfg.AsepritePath, cfg.TempDir, cfg.Timeout)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	srv, err := server.New(cfg, logger)
+	version, err := client.GetVersion(ctx)
 	if err != nil {
-		logger.Error("Health check failed: Could not create server - {Error}", err)
+		fmt.Printf("      FAIL: Failed to run Aseprite: %v\n", err)
 		return 1
 	}
+	fmt.Printf("      PASS: Found %s\n", version)
 
-	// Get version through client
-	version, err := srv.Client().GetVersion(ctx)
-	if err != nil {
-		logger.Error("Health check failed: Could not get Aseprite version - {Error}", err)
-		return 1
-	}
-
-	logger.Information("✓ Aseprite is accessible (version {Version})", version)
-
-	// Check temp directory
+	fmt.Printf("[2/3] Checking temp directory at: %s\n", cfg.TempDir)
 	if err := os.MkdirAll(cfg.TempDir, 0755); err != nil {
-		logger.Error("Health check failed: Could not access temp directory {Path} - {Error}", cfg.TempDir, err)
+		fmt.Printf("      FAIL: Failed to create temp directory: %v\n", err)
 		return 1
 	}
+	testFile := fmt.Sprintf("%s/.health-%d", cfg.TempDir, time.Now().UnixNano())
+	if err := os.WriteFile(testFile, []byte("ok"), 0644); err != nil {
+		fmt.Printf("      FAIL: Temp directory is not writable: %v\n", err)
+		return 1
+	}
+	_ = os.Remove(testFile)
+	fmt.Println("      PASS: Temp directory is writable")
 
-	logger.Information("✓ Temp directory is accessible at {Path}", cfg.TempDir)
+	fmt.Printf("[3/3] Checking configuration parameters...\n")
+	fmt.Printf("      PASS: Timeout = %v, LogLevel = %s\n", cfg.Timeout, cfg.LogLevel)
 
-	logger.Information("Health check passed - all systems operational")
+	fmt.Println("\nAll health checks passed successfully!")
 	return 0
 }

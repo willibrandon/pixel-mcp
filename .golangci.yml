@@ -1,0 +1,27 @@
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  enable:
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - revive
+    - gosec
+    - misspell
+
+linters-settings:
+  govet:
+    enable-all: false
+  gosec:
+    excludes:
+      - G204 # Subprocess launched with variable (expected for Aseprite CLI execution)
+      - G304 # File path provided as variable (expected for sprite files)
+
+issues:
+  exclude-dirs:
+    - .agents

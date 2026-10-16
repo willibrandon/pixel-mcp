@@ -111,6 +111,10 @@ func (c *Client) ExecuteLua(ctx context.Context, script string, spritePath strin
 
 	// Add sprite path if specified
 	if spritePath != "" {
+		// Serialize concurrent operations on the same sprite file
+		unlock := GlobalPathLockManager.Lock(spritePath)
+		defer unlock()
+
 		// Verify sprite exists
 		if _, err := os.Stat(spritePath); os.IsNotExist(err) {
 			return "", fmt.Errorf("sprite file not found: %s", spritePath)

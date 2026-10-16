@@ -191,3 +191,49 @@ func (cm ColorMode) ToLua() string {
 		return "ColorMode.RGB"
 	}
 }
+
+// BatchOpType represents the type of drawing operation within a batch.
+type BatchOpType string
+
+const (
+	// BatchOpPixels draws individual pixels directly to the cel image.
+	BatchOpPixels BatchOpType = "pixels"
+	// BatchOpLine draws a line segment.
+	BatchOpLine BatchOpType = "line"
+	// BatchOpRectangle draws a rectangle (outline or filled).
+	BatchOpRectangle BatchOpType = "rectangle"
+	// BatchOpCircle draws an ellipse/circle (outline or filled).
+	BatchOpCircle BatchOpType = "circle"
+	// BatchOpContour draws a polyline or closed polygon.
+	BatchOpContour BatchOpType = "contour"
+	// BatchOpFill flood fills an area with color.
+	BatchOpFill BatchOpType = "fill"
+)
+
+// BatchOp represents a single drawing operation within a batch.
+//
+// Carries the resolved layer name, frame number, operation type, and all
+// primitive-specific drawing parameters.
+type BatchOp struct {
+	Type        BatchOpType // Operation type (pixels, line, rectangle, circle, contour, fill)
+	LayerName   string      // Target layer name (resolved)
+	FrameNumber int         // 1-based target frame number (resolved)
+	Color       Color       // Drawing color (used by line, rectangle, circle, contour, fill)
+	Pixels      []Pixel     // Pixels array (used by pixels)
+	X1          int         // Line start X
+	Y1          int         // Line start Y
+	X2          int         // Line end X
+	Y2          int         // Line end Y
+	X           int         // Top-left X for rectangle, start X for fill
+	Y           int         // Top-left Y for rectangle, start Y for fill
+	Width       int         // Rectangle width
+	Height      int         // Rectangle height
+	CenterX     int         // Circle center X
+	CenterY     int         // Circle center Y
+	Radius      int         // Circle radius
+	Filled      bool        // Fill flag for rectangle and circle
+	Points      []Point     // Points array for contour
+	Closed      bool        // Closed loop flag for contour
+	Thickness   int         // Brush thickness for line and contour (1-100)
+	Tolerance   int         // Tolerance for fill (0-255)
+}

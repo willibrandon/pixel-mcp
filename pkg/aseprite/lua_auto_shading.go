@@ -88,7 +88,7 @@ app.transaction(function()
 	local celX = cel.position.x
 	local celY = cel.position.y
 	spr:deleteCel(cel)
-	spr:newCel(targetLayer, %d, finalImg, celX, celY)
+	spr:newCel(targetLayer, %d, finalImg, Point(celX, celY))
 end)
 
 -- Add generated colors to palette
@@ -108,18 +108,20 @@ end
 
 -- Build final palette for JSON output
 local paletteHex = {}
-for i = 0, #palette - 1 do
-	local c = palette:getColor(i)
-	table.insert(paletteHex, string.format("#%%02X%%02X%%02X", c.red, c.green, c.blue))
+if palette then
+	for i = 0, #palette - 1 do
+		local c = palette:getColor(i)
+		table.insert(paletteHex, string.format("#%%02X%%02X%%02X", c.red, c.green, c.blue))
+	end
+end
+
+local paletteStr = ""
+if #paletteHex > 0 then
+	paletteStr = '"' .. table.concat(paletteHex, '", "') .. '"'
 end
 
 -- Build JSON output
-local json = string.format([[{
-	"success": true,
-	"colors_added": %d,
-	"palette": [%%s],
-	"regions_shaded": %d
-}]], '"' .. table.concat(paletteHex, '", "') .. '"')
+local json = string.format('{"success": true, "colors_added": %%d, "palette": [%%s], "regions_shaded": %%d}', %d, paletteStr, %d)
 
 -- Save sprite
 spr:saveAs(spr.filename)

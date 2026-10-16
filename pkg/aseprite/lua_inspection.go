@@ -148,14 +148,14 @@ for py = %d, %d do
 
 		pixelIndex = pixelIndex + 1
 
-		-- Early exit if we've collected enough pixels
-		if limit > 0 and #pixels >= limit then
+		-- Early exit once we've passed the pagination range
+		if endIdx >= 0 and pixelIndex > endIdx then
 			break
 		end
 	end
 
 	-- Early exit from outer loop
-	if limit > 0 and #pixels >= limit then
+	if endIdx >= 0 and pixelIndex > endIdx then
 		break
 	end
 end

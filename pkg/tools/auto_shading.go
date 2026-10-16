@@ -29,7 +29,7 @@ type ApplyAutoShadingInput struct {
 type ApplyAutoShadingOutput struct {
 	Success       bool     `json:"success" jsonschema:"Whether the operation succeeded"`
 	ColorsAdded   int      `json:"colors_added" jsonschema:"Number of colors added to palette"`
-	Palette       []string `json:"palette" jsonschema:"Final palette after shading"`
+	Palette       []string `json:"palette,omitempty" jsonschema:"Final palette after shading"`
 	RegionsShaded int      `json:"regions_shaded" jsonschema:"Number of regions shaded"`
 }
 
@@ -53,7 +53,7 @@ func RegisterAutoShadingTools(server *mcp.Server, client *aseprite.Client, gen *
 
 			// Validate inputs
 			if input.Intensity < 0.0 || input.Intensity > 1.0 {
-				return nil, nil, fmt.Errorf("intensity must be between 0.0 and 1.0, got %f", input.Intensity)
+				return ToolError[ApplyAutoShadingOutput](fmt.Sprintf("intensity must be between 0.0 and 1.0, got %f", input.Intensity), nil)
 			}
 
 			validDirections := map[string]bool{
@@ -62,25 +62,25 @@ func RegisterAutoShadingTools(server *mcp.Server, client *aseprite.Client, gen *
 				"bottom_left": true, "bottom": true, "bottom_right": true,
 			}
 			if !validDirections[input.LightDirection] {
-				return nil, nil, fmt.Errorf("invalid light direction: %s", input.LightDirection)
+				return ToolError[ApplyAutoShadingOutput](fmt.Sprintf("invalid light direction: %s", input.LightDirection), nil)
 			}
 
 			validStyles := map[string]bool{
 				"cell": true, "smooth": true, "soft": true,
 			}
 			if !validStyles[input.Style] {
-				return nil, nil, fmt.Errorf("invalid style: %s (must be cell, smooth, or soft)", input.Style)
+				return ToolError[ApplyAutoShadingOutput](fmt.Sprintf("invalid style: %s (must be cell, smooth, or soft)", input.Style), nil)
 			}
 
 			// Check sprite file exists
 			if _, err := os.Stat(input.SpritePath); os.IsNotExist(err) {
-				return nil, nil, fmt.Errorf("sprite file not found: %s", input.SpritePath)
+				return ToolError[ApplyAutoShadingOutput](fmt.Sprintf("sprite file not found: %s", input.SpritePath), nil)
 			}
 
 			// Step 1: Export layer/frame to temporary PNG
 			tempDir, err := os.MkdirTemp("", "pixel-mcp-shading-*")
 			if err != nil {
-				return nil, nil, fmt.Errorf("failed to create temp directory: %w", err)
+				return ToolError[ApplyAutoShadingOutput]("failed to create temp directory", err)
 			}
 			defer os.RemoveAll(tempDir)
 
@@ -120,13 +120,13 @@ print("Exported successfully")`,
 
 			_, err = client.ExecuteLua(ctx, exportScript, input.SpritePath)
 			if err != nil {
-				return nil, nil, fmt.Errorf("failed to export layer to PNG: %w", err)
+				return ToolError[ApplyAutoShadingOutput]("failed to export layer to PNG", err)
 			}
 
 			// Step 2: Load PNG and apply auto-shading in Go
 			imgFile, err := os.Open(tempPNG)
 			if err != nil {
-				return nil, nil, fmt.Errorf("failed to open exported PNG: %w", err)
+				return ToolError[ApplyAutoShadingOutput]("failed to open exported PNG", err)
 			}
 			defer imgFile.Close()
 
@@ -136,7 +136,7 @@ print("Exported successfully")`,
 				imgFile.Seek(0, 0)
 				img, _, err = image.Decode(imgFile)
 				if err != nil {
-					return nil, nil, fmt.Errorf("failed to decode image: %w", err)
+					return ToolError[ApplyAutoShadingOutput]("failed to decode image", err)
 				}
 			}
 
@@ -149,7 +149,7 @@ print("Exported successfully")`,
 				input.HueShift,
 			)
 			if err != nil {
-				return nil, nil, fmt.Errorf("auto-shading failed: %w", err)
+				return ToolError[ApplyAutoShadingOutput]("auto-shading failed", err)
 			}
 
 			opLogger.Information("Auto-shading completed",
@@ -160,12 +160,12 @@ print("Exported successfully")`,
 			shadedPNG := filepath.Join(tempDir, "shaded.png")
 			shadedFile, err := os.Create(shadedPNG)
 			if err != nil {
-				return nil, nil, fmt.Errorf("failed to create shaded PNG: %w", err)
+				return ToolError[ApplyAutoShadingOutput]("failed to create shaded PNG", err)
 			}
 			defer shadedFile.Close()
 
 			if err := png.Encode(shadedFile, shadedImg); err != nil {
-				return nil, nil, fmt.Errorf("failed to encode shaded PNG: %w", err)
+				return ToolError[ApplyAutoShadingOutput]("failed to encode shaded PNG", err)
 			}
 
 			// Step 3: Generate and execute Lua script to apply shaded result
@@ -180,13 +180,13 @@ print("Exported successfully")`,
 			output, err := client.ExecuteLua(ctx, applyScript, input.SpritePath)
 			if err != nil {
 				opLogger.Error("Failed to apply shaded result", "error", err)
-				return nil, nil, fmt.Errorf("failed to apply shaded result: %w", err)
+				return ToolError[ApplyAutoShadingOutput]("failed to apply shaded result", err)
 			}
 
 			// Parse JSON output from Lua
 			var result ApplyAutoShadingOutput
 			if err := parseJSON(output, &result); err != nil {
-				return nil, nil, fmt.Errorf("failed to parse shading output: %w", err)
+				return ToolError[ApplyAutoShadingOutput]("failed to parse shading output", err)
 			}
 
 			opLogger.Information("Auto-shading applied successfully",
@@ -195,7 +195,7 @@ print("Exported successfully")`,
 				"colors_added", result.ColorsAdded,
 				"regions_shaded", result.RegionsShaded)
 
-			return nil, &result, nil
+			return ToolSuccess(&result)
 		}),
 	)
 }

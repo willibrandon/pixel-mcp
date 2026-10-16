@@ -405,3 +405,96 @@ func BenchmarkProfessional_CompleteWorkflow(b *testing.B) {
 		os.Remove(exportPath)
 	}
 }
+
+func getBenchmark20Ops() []aseprite.BatchOp {
+	return []aseprite.BatchOp{
+		{Type: aseprite.BatchOpRectangle, LayerName: "Layer 1", FrameNumber: 1, X: 0, Y: 0, Width: 10, Height: 10, Color: aseprite.Color{R: 255, G: 0, B: 0, A: 255}, Filled: true},
+		{Type: aseprite.BatchOpRectangle, LayerName: "Layer 1", FrameNumber: 1, X: 15, Y: 0, Width: 10, Height: 10, Color: aseprite.Color{R: 0, G: 255, B: 0, A: 255}, Filled: false},
+		{Type: aseprite.BatchOpRectangle, LayerName: "Layer 1", FrameNumber: 1, X: 30, Y: 0, Width: 10, Height: 10, Color: aseprite.Color{R: 0, G: 0, B: 255, A: 255}, Filled: true},
+		{Type: aseprite.BatchOpRectangle, LayerName: "Layer 1", FrameNumber: 1, X: 45, Y: 0, Width: 10, Height: 10, Color: aseprite.Color{R: 255, G: 255, B: 0, A: 255}, Filled: false},
+
+		{Type: aseprite.BatchOpCircle, LayerName: "Layer 1", FrameNumber: 1, CenterX: 8, CenterY: 20, Radius: 6, Color: aseprite.Color{R: 255, G: 0, B: 255, A: 255}, Filled: true},
+		{Type: aseprite.BatchOpCircle, LayerName: "Layer 1", FrameNumber: 1, CenterX: 24, CenterY: 20, Radius: 6, Color: aseprite.Color{R: 0, G: 255, B: 255, A: 255}, Filled: false},
+		{Type: aseprite.BatchOpCircle, LayerName: "Layer 1", FrameNumber: 1, CenterX: 40, CenterY: 20, Radius: 6, Color: aseprite.Color{R: 128, G: 128, B: 128, A: 255}, Filled: true},
+		{Type: aseprite.BatchOpCircle, LayerName: "Layer 1", FrameNumber: 1, CenterX: 56, CenterY: 20, Radius: 6, Color: aseprite.Color{R: 200, G: 100, B: 50, A: 255}, Filled: false},
+
+		{Type: aseprite.BatchOpLine, LayerName: "Layer 1", FrameNumber: 1, X1: 0, Y1: 30, X2: 60, Y2: 30, Color: aseprite.Color{R: 255, G: 255, B: 255, A: 255}, Thickness: 1},
+		{Type: aseprite.BatchOpLine, LayerName: "Layer 1", FrameNumber: 1, X1: 0, Y1: 35, X2: 60, Y2: 35, Color: aseprite.Color{R: 100, G: 200, B: 100, A: 255}, Thickness: 2},
+		{Type: aseprite.BatchOpLine, LayerName: "Layer 1", FrameNumber: 1, X1: 0, Y1: 40, X2: 60, Y2: 40, Color: aseprite.Color{R: 200, G: 100, B: 200, A: 255}, Thickness: 1},
+		{Type: aseprite.BatchOpLine, LayerName: "Layer 1", FrameNumber: 1, X1: 0, Y1: 45, X2: 60, Y2: 45, Color: aseprite.Color{R: 255, G: 150, B: 0, A: 255}, Thickness: 2},
+
+		{Type: aseprite.BatchOpContour, LayerName: "Layer 1", FrameNumber: 1, Points: []aseprite.Point{{X: 0, Y: 50}, {X: 10, Y: 55}, {X: 20, Y: 50}}, Color: aseprite.Color{R: 255, G: 0, B: 0, A: 255}, Thickness: 1, Closed: false},
+		{Type: aseprite.BatchOpContour, LayerName: "Layer 1", FrameNumber: 1, Points: []aseprite.Point{{X: 25, Y: 50}, {X: 35, Y: 55}, {X: 35, Y: 60}, {X: 25, Y: 60}}, Color: aseprite.Color{R: 0, G: 255, B: 0, A: 255}, Thickness: 1, Closed: true},
+		{Type: aseprite.BatchOpContour, LayerName: "Layer 1", FrameNumber: 1, Points: []aseprite.Point{{X: 40, Y: 50}, {X: 50, Y: 55}, {X: 60, Y: 50}}, Color: aseprite.Color{R: 0, G: 0, B: 255, A: 255}, Thickness: 1, Closed: false},
+		{Type: aseprite.BatchOpContour, LayerName: "Layer 1", FrameNumber: 1, Points: []aseprite.Point{{X: 40, Y: 55}, {X: 50, Y: 60}, {X: 60, Y: 55}}, Color: aseprite.Color{R: 255, G: 255, B: 0, A: 255}, Thickness: 1, Closed: false},
+
+		{Type: aseprite.BatchOpPixels, LayerName: "Layer 1", FrameNumber: 1, Pixels: []aseprite.Pixel{{Point: aseprite.Point{X: 1, Y: 62}, Color: aseprite.Color{R: 255, G: 0, B: 0, A: 255}}}},
+		{Type: aseprite.BatchOpPixels, LayerName: "Layer 1", FrameNumber: 1, Pixels: []aseprite.Pixel{{Point: aseprite.Point{X: 5, Y: 62}, Color: aseprite.Color{R: 0, G: 255, B: 0, A: 255}}}},
+		{Type: aseprite.BatchOpPixels, LayerName: "Layer 1", FrameNumber: 1, Pixels: []aseprite.Pixel{{Point: aseprite.Point{X: 10, Y: 62}, Color: aseprite.Color{R: 0, G: 0, B: 255, A: 255}}}},
+		{Type: aseprite.BatchOpPixels, LayerName: "Layer 1", FrameNumber: 1, Pixels: []aseprite.Pixel{{Point: aseprite.Point{X: 15, Y: 62}, Color: aseprite.Color{R: 255, G: 255, B: 255, A: 255}}}},
+	}
+}
+
+// BenchmarkBatchDraw_Separate20Ops benchmarks executing 20 drawing operations as 20 separate Aseprite executions.
+func BenchmarkBatchDraw_Separate20Ops(b *testing.B) {
+	cfg := testutil.LoadTestConfigTB(b)
+	client := aseprite.NewClient(cfg.AsepritePath, cfg.TempDir, 60*time.Second)
+	gen := aseprite.NewLuaGenerator()
+	ctx := context.Background()
+	ops := getBenchmark20Ops()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		spritePath := filepath.Join(b.TempDir(), "bench-separate-ops.aseprite")
+		createScript := gen.CreateCanvas(64, 64, aseprite.ColorModeRGB, spritePath)
+		if _, err := client.ExecuteLua(ctx, createScript, ""); err != nil {
+			b.Fatalf("CreateCanvas failed: %v", err)
+		}
+
+		for _, op := range ops {
+			var script string
+			switch op.Type {
+			case aseprite.BatchOpRectangle:
+				script = gen.DrawRectangle(op.LayerName, op.FrameNumber, op.X, op.Y, op.Width, op.Height, op.Color, op.Filled, false)
+			case aseprite.BatchOpCircle:
+				script = gen.DrawCircle(op.LayerName, op.FrameNumber, op.CenterX, op.CenterY, op.Radius, op.Color, op.Filled, false)
+			case aseprite.BatchOpLine:
+				script = gen.DrawLine(op.LayerName, op.FrameNumber, op.X1, op.Y1, op.X2, op.Y2, op.Color, op.Thickness, false)
+			case aseprite.BatchOpContour:
+				script = gen.DrawContour(op.LayerName, op.FrameNumber, op.Points, op.Color, op.Thickness, op.Closed, false)
+			case aseprite.BatchOpPixels:
+				script = gen.DrawPixels(op.LayerName, op.FrameNumber, op.Pixels, false)
+			}
+			if _, err := client.ExecuteLua(ctx, script, spritePath); err != nil {
+				b.Fatalf("Separate op execution failed: %v", err)
+			}
+		}
+
+		os.Remove(spritePath)
+	}
+}
+
+// BenchmarkBatchDraw_Batch20Ops benchmarks executing the same 20 drawing operations in a single BatchDraw execution.
+func BenchmarkBatchDraw_Batch20Ops(b *testing.B) {
+	cfg := testutil.LoadTestConfigTB(b)
+	client := aseprite.NewClient(cfg.AsepritePath, cfg.TempDir, 60*time.Second)
+	gen := aseprite.NewLuaGenerator()
+	ctx := context.Background()
+	ops := getBenchmark20Ops()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		spritePath := filepath.Join(b.TempDir(), "bench-batch-ops.aseprite")
+		createScript := gen.CreateCanvas(64, 64, aseprite.ColorModeRGB, spritePath)
+		if _, err := client.ExecuteLua(ctx, createScript, ""); err != nil {
+			b.Fatalf("CreateCanvas failed: %v", err)
+		}
+
+		batchScript := gen.BatchDraw(ops, false)
+		if _, err := client.ExecuteLua(ctx, batchScript, spritePath); err != nil {
+			b.Fatalf("BatchDraw execution failed: %v", err)
+		}
+
+		os.Remove(spritePath)
+	}
+}

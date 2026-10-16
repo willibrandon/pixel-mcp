@@ -126,3 +126,19 @@ jobs:
               printf "{\"aseprite_path\":\"/build/aseprite/build/bin/aseprite\",\"temp_dir\":\"/tmp/pixel-mcp\",\"timeout\":30,\"log_level\":\"info\"}" > /root/.config/pixel-mcp/config.json && \
               cd /workspace && \
               go test -tags=integration -v ./...'
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          args: --timeout=5m
+

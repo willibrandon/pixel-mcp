@@ -132,6 +132,7 @@ func (s *Server) registerTools() {
 
 	// Register drawing tools
 	tools.RegisterDrawingTools(s.mcp, s.client, s.gen, s.config, s.logger)
+	tools.RegisterBatchTools(s.mcp, s.client, s.gen, s.config, s.logger)
 
 	// Register selection tools
 	tools.RegisterSelectionTools(s.mcp, s.client, s.gen, s.config, s.logger)
@@ -165,6 +166,11 @@ func (s *Server) registerTools() {
 
 	// Register antialiasing tools
 	tools.RegisterAntialiasingTools(s.mcp, s.client, s.gen, s.config, s.logger)
+
+	// Register quality engine tools (preview, color ramps, reference import)
+	tools.RegisterPreviewTools(s.mcp, s.client, s.config, s.logger)
+	tools.RegisterColorRampTools(s.mcp, s.client, s.gen, s.config, s.logger)
+	tools.RegisterReferenceImportTools(s.mcp, s.client, s.config, s.logger)
 }
 
 // Client returns the underlying Aseprite client for testing.

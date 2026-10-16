@@ -114,6 +114,7 @@ Then use natural language to create sprites:
 ### Drawing & Painting
 | Tool | Description |
 |------|-------------|
+| `batch_draw` | Apply multiple drawing operations atomically in a single Aseprite run |
 | `draw_pixels` | Draw individual pixels (supports batch operations, optional palette snapping) |
 | `draw_line` | Draw a line between two points (optional palette snapping) |
 | `draw_contour` | Draw a polyline or polygon by connecting multiple points (optional palette snapping) |
@@ -174,7 +175,7 @@ Then use natural language to create sprites:
 ### Inspection & Export
 | Tool | Description |
 |------|-------------|
-| `get_pixels` | Read pixel data from a rectangular region (paginated, for verification) |
+| `get_pixels` | Read pixel data from a rectangular region; supports paginated `pixels` format or compact `grid` format with legend |
 | `export_sprite` | Export sprite to PNG/GIF/JPG/BMP |
 | `export_spritesheet` | Export animation frames as spritesheet (horizontal/vertical/rows/columns/packed layout, optional JSON metadata) |
 | `import_image` | Import external image file as a layer in the sprite |

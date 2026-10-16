@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -509,4 +510,147 @@ func TestGetPixelsPagination_ViaMCP(t *testing.T) {
 
 	assert.Equal(t, 5, len(output3.Pixels), "Third page should have remaining 5 pixels")
 	assert.Empty(t, output3.NextCursor, "Should have no next cursor on last page")
+}
+
+func TestBuildPixelGridFormat(t *testing.T) {
+	// generate 90 distinct colors for the exceeding colors test
+	exceedingColors := make([]PixelData, 90)
+	for i := 0; i < 90; i++ {
+		exceedingColors[i] = PixelData{
+			X:     i % 10,
+			Y:     i / 10,
+			Color: fmt.Sprintf("#%02X%02X%02XFF", (i*2)%256, (i*3)%256, (i*5)%256),
+		}
+	}
+
+	tests := []struct {
+		name       string
+		x, y       int
+		width      int
+		height     int
+		pixels     []PixelData
+		wantGrid   []string
+		wantLegend map[string]string
+		wantErr    bool
+		errMsg     string
+	}{
+		{
+			name:   "transparent alpha",
+			x:      0,
+			y:      0,
+			width:  2,
+			height: 1,
+			pixels: []PixelData{
+				{X: 0, Y: 0, Color: "#FF000000"}, // alpha 00 -> transparent
+				{X: 1, Y: 0, Color: "#00FF00FF"}, // opaque green
+			},
+			wantGrid: []string{".0"},
+			wantLegend: map[string]string{
+				"0": "#00FF00FF",
+			},
+			wantErr: false,
+		},
+		{
+			name:   "missing positions",
+			x:      0,
+			y:      0,
+			width:  3,
+			height: 1,
+			pixels: []PixelData{
+				{X: 0, Y: 0, Color: "#FF0000FF"},
+				// (1, 0) missing -> should be '.'
+				{X: 2, Y: 0, Color: "#00FF00FF"},
+			},
+			wantGrid: []string{"0.1"},
+			wantLegend: map[string]string{
+				"0": "#FF0000FF",
+				"1": "#00FF00FF",
+			},
+			wantErr: false,
+		},
+		{
+			name:   "key ordering by first appearance",
+			x:      0,
+			y:      0,
+			width:  2,
+			height: 2,
+			pixels: []PixelData{
+				{X: 0, Y: 0, Color: "#FF0000FF"}, // first -> '0'
+				{X: 1, Y: 0, Color: "#00FF00FF"}, // second -> '1'
+				{X: 0, Y: 1, Color: "#00FF00FF"}, // already seen -> '1'
+				{X: 1, Y: 1, Color: "#0000FFFF"}, // third -> '2'
+			},
+			wantGrid: []string{"01", "12"},
+			wantLegend: map[string]string{
+				"0": "#FF0000FF",
+				"1": "#00FF00FF",
+				"2": "#0000FFFF",
+			},
+			wantErr: false,
+		},
+		{
+			name:   "region offset (x,y != 0)",
+			x:      10,
+			y:      20,
+			width:  2,
+			height: 2,
+			pixels: []PixelData{
+				{X: 10, Y: 20, Color: "#FF0000FF"}, // top-left of region
+				{X: 11, Y: 21, Color: "#00FF00FF"}, // bottom-right of region
+			},
+			wantGrid: []string{"0.", ".1"},
+			wantLegend: map[string]string{
+				"0": "#FF0000FF",
+				"1": "#00FF00FF",
+			},
+			wantErr: false,
+		},
+		{
+			name:   "legend excludes '.'",
+			x:      0,
+			y:      0,
+			width:  2,
+			height: 2,
+			pixels: []PixelData{
+				{X: 0, Y: 0, Color: "#00000000"}, // transparent
+				{X: 1, Y: 0, Color: "#FF0000FF"}, // red
+				// (0,1) missing
+				{X: 1, Y: 1, Color: "#00000000"}, // transparent
+			},
+			wantGrid: []string{".0", ".."},
+			wantLegend: map[string]string{
+				"0": "#FF0000FF",
+			},
+			wantErr: false,
+		},
+		{
+			name:    "exceeding 86 colors -> error",
+			x:       0,
+			y:       0,
+			width:   10,
+			height:  10,
+			pixels:  exceedingColors,
+			wantErr: true,
+			errMsg:  "more distinct non-transparent colors than available keys",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			grid, legend, err := buildPixelGridFormat(tt.x, tt.y, tt.width, tt.height, tt.pixels)
+			if tt.wantErr {
+				require.Error(t, err)
+				if tt.errMsg != "" {
+					assert.Contains(t, err.Error(), tt.errMsg)
+				}
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantGrid, grid)
+			assert.Equal(t, tt.wantLegend, legend)
+			_, dotInLegend := legend["."]
+			assert.False(t, dotInLegend, "legend must never contain '.'")
+		})
+	}
 }
