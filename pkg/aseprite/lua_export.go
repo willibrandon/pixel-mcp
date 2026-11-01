@@ -47,10 +47,13 @@ local tempSpr = Sprite(spr.width, spr.height, spr.colorMode)
 
 -- Copy the palette from the original sprite for indexed mode
 if spr.colorMode == ColorMode.INDEXED then
+	-- Match the source palette size (a new sprite starts with 256 entries)
+	tempSpr.palettes[1]:resize(#spr.palettes[1])
 	for i = 0, #spr.palettes[1]-1 do
 		tempSpr.palettes[1]:setColor(i, spr.palettes[1]:getColor(i))
 	end
 	-- Set transparent color to 255 to allow palette index 0 for actual colors
+	-- (after the resize, which clamps transparentColor into the palette range)
 	tempSpr.transparentColor = 255
 end
 
