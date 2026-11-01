@@ -187,6 +187,12 @@ func TestLuaGenerator_ExportSprite(t *testing.T) {
 			t.Error("script missing temporary sprite creation")
 		}
 
+		// Check that the temporary sprite's palette is resized to the source palette size
+		// (a new sprite has 256 entries, which would pad indexed PNG exports)
+		if !strings.Contains(script, "tempSpr.palettes[1]:resize(#spr.palettes[1])") {
+			t.Error("script missing palette resize for temporary sprite")
+		}
+
 		// Check that it references the target frame
 		if !strings.Contains(script, "spr.frames[2]") {
 			t.Error("script missing target frame reference")
