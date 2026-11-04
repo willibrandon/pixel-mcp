@@ -439,7 +439,8 @@ func (g *LuaGenerator) PasteClipboard(layerName string, frameNumber int, x, y *i
 		pastePos = "local pasteX, pasteY = 0, 0"
 	}
 
-	return fmt.Sprintf(`local spr = app.activeSprite
+	return GenerateCelCoverHelper() + fmt.Sprintf(`
+local spr = app.activeSprite
 if not spr then
 	error("No active sprite")
 end
@@ -483,14 +484,20 @@ end
 -- Paste clipboard content to target layer
 %s
 
+local clipImg = clipCel.image
+local rx1, ry1 = math.max(pasteX, 0), math.max(pasteY, 0)
+local rx2 = math.min(pasteX + clipImg.width - 1, spr.width - 1)
+local ry2 = math.min(pasteY + clipImg.height - 1, spr.height - 1)
+if rx1 > rx2 or ry1 > ry2 then
+	error("Paste position is outside the canvas")
+end
+
 app.transaction(function()
-	local targetCel = layer:cel(frame)
-	if not targetCel then
-		targetCel = spr:newCel(layer, frame)
-	end
+	-- Grow the target cel over the paste area, so nothing outside its old bounds is clipped
+	local targetCel = celCovering(spr, layer, frame, rx1, ry1, rx2, ry2)
 
 	-- Draw clipboard image onto target
-	targetCel.image:drawImage(clipCel.image, Point(pasteX - targetCel.position.x, pasteY - targetCel.position.y))
+	targetCel.image:drawImage(clipImg, Point(pasteX - targetCel.position.x, pasteY - targetCel.position.y))
 end)
 
 spr:saveAs(spr.filename)

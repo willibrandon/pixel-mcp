@@ -35,9 +35,22 @@ type DrawPixelsInput struct {
 
 // DrawPixelsOutput defines the output for the draw_pixels tool.
 //
-// Reports the number of pixels successfully drawn.
+// Reports the number of pixels drawn, and how many were skipped for lying outside the canvas.
 type DrawPixelsOutput struct {
-	PixelsDrawn int `json:"pixels_drawn" jsonschema:"Number of pixels successfully drawn"` // Count of pixels drawn
+	PixelsDrawn   int `json:"pixels_drawn" jsonschema:"Number of pixels successfully drawn"`                        // Count of pixels drawn
+	PixelsSkipped int `json:"pixels_skipped,omitempty" jsonschema:"Number of pixels outside the canvas, not drawn"` // Count of out-of-canvas pixels
+}
+
+// parsePixelsSkipped reads the "Pixels skipped: N" line printed by the DrawPixels script.
+// It returns 0 if the line is missing or malformed.
+func parsePixelsSkipped(output string) int {
+	for _, line := range strings.Split(output, "\n") {
+		var n int
+		if _, err := fmt.Sscanf(strings.TrimSpace(line), "Pixels skipped: %d", &n); err == nil {
+			return n
+		}
+	}
+	return 0
 }
 
 // DrawLineInput defines the input parameters for the draw_line tool.
@@ -202,9 +215,10 @@ func RegisterDrawingTools(server *mcp.Server, client *aseprite.Client, gen *asep
 				opLogger.Warning("Unexpected output from draw_pixels", "output", output)
 			}
 
-			opLogger.Information("Pixels drawn successfully", "sprite", input.SpritePath, "layer", input.LayerName, "frame", input.FrameNumber, "count", len(pixels))
+			skipped := parsePixelsSkipped(output)
+			opLogger.Information("Pixels drawn successfully", "sprite", input.SpritePath, "layer", input.LayerName, "frame", input.FrameNumber, "count", len(pixels)-skipped, "skipped", skipped)
 
-			return nil, &DrawPixelsOutput{PixelsDrawn: len(pixels)}, nil
+			return nil, &DrawPixelsOutput{PixelsDrawn: len(pixels) - skipped, PixelsSkipped: skipped}, nil
 		}),
 	)
 

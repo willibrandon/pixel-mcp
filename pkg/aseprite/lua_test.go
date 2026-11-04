@@ -159,12 +159,26 @@ func TestLuaGenerator_DrawPixels(t *testing.T) {
 		t.Error("script missing layer iteration")
 	}
 
-	if !strings.Contains(script, "img:putPixel(0, 0, Color(255, 0, 0, 255))") {
+	if !strings.Contains(script, "put(0, 0, Color(255, 0, 0, 255))") {
 		t.Error("script missing first pixel")
 	}
 
-	if !strings.Contains(script, "img:putPixel(1, 1, Color(0, 255, 0, 255))") {
+	if !strings.Contains(script, "put(1, 1, Color(0, 255, 0, 255))") {
 		t.Error("script missing second pixel")
+	}
+
+	// Pixels are drawn in canvas coordinates: the cel is grown over the pixels'
+	// bounding box and coordinates are offset by its position.
+	if !strings.Contains(script, "local function celCovering") {
+		t.Error("script missing cel cover helper")
+	}
+
+	if !strings.Contains(script, "img:putPixel(x - ox, y - oy, color)") {
+		t.Error("script does not offset pixels by the cel position")
+	}
+
+	if !strings.Contains(script, "math.max(0, 0), math.max(0, 0)") || !strings.Contains(script, "math.min(1, canvasW - 1), math.min(1, canvasH - 1)") {
+		t.Error("script missing the pixels' bounding box")
 	}
 }
 

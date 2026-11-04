@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Canvas coordinates after a cel is trimmed.** Aseprite trims a cel to its content, so after a shape tool runs, a layer's cel no longer starts at (0,0). Some tools wrote into the cel's image directly and broke:
+  - `draw_pixels` and `draw_with_dither` placed pixels offset by the cel's position, and silently dropped those outside the cel. `draw_pixels` still counted the dropped pixels in `pixels_drawn`.
+  - `paste_clipboard` silently clipped pasted pixels to the cel's old bounds.
+  - These tools now grow the cel to cover the area they draw (`GenerateCelCoverHelper`) and offset coordinates by the cel's position. Integration tests are in `pkg/tools/cel_offset_integration_test.go`.
+- `draw_pixels` now skips pixels outside the canvas and reports them as `pixels_skipped`. `pixels_drawn` counts only the pixels actually drawn.
+
 ## [0.5.0] - 2025-10-18
 
 ### Added
