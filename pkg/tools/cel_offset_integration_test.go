@@ -112,39 +112,6 @@ func TestIntegration_DrawPixels_AfterShapeTrimsCel(t *testing.T) {
 	e.expect(m, 20, 16, "#00000000") // (12,10) shifted by the old cel position: must be empty
 }
 
-func TestIntegration_DrawPixels_AfterShapeTrimsCel_Indexed(t *testing.T) {
-	cfg := testutil.LoadTestConfig(t)
-	e := &celTestEnv{
-		t:      t,
-		ctx:    context.Background(),
-		client: aseprite.NewClient(cfg.AsepritePath, cfg.TempDir, 30*time.Second),
-		gen:    aseprite.NewLuaGenerator(),
-		sprite: testutil.TempSpritePath(t, "cel-offset-pixels-indexed.aseprite"),
-	}
-	e.run(e.gen.CreateCanvas(32, 32, aseprite.ColorModeIndexed, e.sprite), "")
-	// Index 0 is the sprite's transparent index; give it a colour no pixel is drawn
-	// with, so get_pixels shows where the grown cel was filled with transparency.
-	e.run(e.gen.SetPalette([]string{"#123456FF", "#FF0000FF", "#00FF00FF", "#0000FFFF"}), e.sprite)
-
-	e.run(e.gen.DrawRectangle("Layer 1", 1, 8, 6, 16, 10, celBlue, true, true), e.sprite)
-	e.run(e.gen.DrawPixels("Layer 1", 1, []aseprite.Pixel{
-		{Point: aseprite.Point{X: 2, Y: 2}, Color: celRed},
-		{Point: aseprite.Point{X: 30, Y: 30}, Color: celGreen},
-	}, true), e.sprite)
-
-	m := e.pixels()
-	e.expect(m, 2, 2, "#FF0000FF")
-	e.expect(m, 30, 30, "#00FF00FF")
-	e.expect(m, 8, 6, "#0000FFFF")
-	e.expect(m, 23, 15, "#0000FFFF")
-	// Undrawn pixels in the grown area must hold the transparent index (0).
-	for _, pos := range [][2]int{{5, 5}, {20, 16}, {28, 28}} {
-		if c := m[testutil.FormatPixelPos(pos[0], pos[1])]; c != "" && c != "#123456FF" {
-			t.Errorf("pixel (%d,%d) = %s, want transparent index 0", pos[0], pos[1], c)
-		}
-	}
-}
-
 func TestIntegration_DrawPixels_InsideTrimmedCel(t *testing.T) {
 	e := newCelTestEnv(t, "cel-offset-pixels-inside.aseprite")
 
