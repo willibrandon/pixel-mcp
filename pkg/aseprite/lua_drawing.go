@@ -16,11 +16,13 @@ import (
 //   - pixels: slice of Pixel structs containing {X, Y, Color} data
 //   - usePalette: if true, snaps each pixel color to nearest palette color
 //
-// The operation is wrapped in a transaction for atomicity and the sprite
-// is saved after pixels are drawn. If the specified layer has no cel at the
-// target frame, a new cel is created automatically.
+// Coordinates are canvas coordinates. The operation is wrapped in a transaction
+// for atomicity and the sprite is saved after pixels are drawn. The layer's cel
+// at the target frame is created, or grown, to cover every pixel drawn (see
+// GenerateCelCoverHelper). Pixels outside the canvas are not drawn.
 //
-// Prints "Pixels drawn successfully" on success.
+// Prints "Pixels drawn successfully" and then "Pixels skipped: N", where N is
+// the number of pixels outside the canvas.
 // Returns an error if:
 //   - No sprite is active
 //   - The layer is not found
@@ -34,6 +36,25 @@ func (g *LuaGenerator) DrawPixels(layerName string, frameNumber int, pixels []Pi
 	if usePalette {
 		sb.WriteString(GeneratePaletteSnapperHelper())
 		sb.WriteString("\n")
+	}
+	sb.WriteString(GenerateCelCoverHelper())
+	sb.WriteString("\n")
+
+	// Bounding box of the requested pixels; the script clips it to the canvas.
+	minX, minY, maxX, maxY := 0, 0, -1, -1
+	for i, p := range pixels {
+		if i == 0 || p.X < minX {
+			minX = p.X
+		}
+		if i == 0 || p.Y < minY {
+			minY = p.Y
+		}
+		if i == 0 || p.X > maxX {
+			maxX = p.X
+		}
+		if i == 0 || p.Y > maxY {
+			maxY = p.Y
+		}
 	}
 
 	sb.WriteString(fmt.Sprintf(`local spr = app.activeSprite
@@ -59,24 +80,39 @@ if not frame then
 	error("Frame not found: %d")
 end
 
+local canvasW, canvasH = spr.width, spr.height
+local x1, y1 = math.max(%d, 0), math.max(%d, 0)
+local x2, y2 = math.min(%d, canvasW - 1), math.min(%d, canvasH - 1)
+local skipped = 0
+
 app.transaction(function()
-	local cel = layer:cel(frame)
-	if not cel then
-		cel = spr:newCel(layer, frame)
+	local img, ox, oy
+	if x1 <= x2 and y1 <= y2 then
+		local cel = celCovering(spr, layer, frame, x1, y1, x2, y2)
+		img, ox, oy = cel.image, cel.position.x, cel.position.y
 	end
 
-	local img = cel.image
-`, escapedName, escapedName, frameNumber, frameNumber))
+	-- Draw at canvas (x, y); count pixels outside the canvas instead of drawing them
+	local function put(x, y, color)
+		if x < 0 or y < 0 or x >= canvasW or y >= canvasH then
+			skipped = skipped + 1
+		else
+			img:putPixel(x - ox, y - oy, color)
+		end
+	end
+
+`, escapedName, escapedName, frameNumber, frameNumber, minX, minY, maxX, maxY))
 
 	// Add pixel drawing commands
 	for _, p := range pixels {
-		sb.WriteString(fmt.Sprintf("\timg:putPixel(%d, %d, %s)\n", p.X, p.Y, FormatColorWithPalette(p.Color, usePalette)))
+		sb.WriteString(fmt.Sprintf("\tput(%d, %d, %s)\n", p.X, p.Y, FormatColorWithPalette(p.Color, usePalette)))
 	}
 
 	sb.WriteString(`end)
 
 spr:saveAs(spr.filename)
-print("Pixels drawn successfully")`)
+print("Pixels drawn successfully")
+print("Pixels skipped: " .. skipped)`)
 
 	return sb.String()
 }
@@ -696,12 +732,13 @@ local matrixSize = 4`
 local matrixSize = 4`
 	case "floyd_steinberg":
 		// Floyd-Steinberg uses error diffusion instead of matrix patterns
-		return generateFloydSteinbergLua(escapedLayerName, frameNumber, x, y, width, height, c1, c2, density)
+		return ditherRegionPrelude(x, y, width, height) +
+			generateFloydSteinbergLua(escapedLayerName, frameNumber, x, y, width, height, c1, c2, density)
 	default:
 		return fmt.Sprintf(`error("Unknown dithering pattern: %s")`, pattern)
 	}
 
-	return fmt.Sprintf(`local spr = app.activeSprite
+	return ditherRegionPrelude(x, y, width, height) + fmt.Sprintf(`local spr = app.activeSprite
 if not spr then
 	error("No active sprite")
 end
@@ -725,18 +762,17 @@ if not frame then
 	error("Frame not found: %d")
 end
 
--- Get or create cel
-local cel = layer:cel(frame)
-if not cel then
-	cel = spr:newCel(layer, frame)
+-- Get the cel, grown to cover the dither region (clipped to the canvas).
+-- ditherX/Y/W/H are defined by the prelude from ditherRegionPrelude.
+local rx1, ry1 = math.max(ditherX, 0), math.max(ditherY, 0)
+local rx2 = math.min(ditherX + ditherW - 1, spr.width - 1)
+local ry2 = math.min(ditherY + ditherH - 1, spr.height - 1)
+if rx1 > rx2 or ry1 > ry2 then
+	error("Dither region is outside the canvas")
 end
-
--- Create or get image
+local cel = celCovering(spr, layer, frame, rx1, ry1, rx2, ry2)
 local img = cel.image
-if not img then
-	img = Image(spr.width, spr.height, spr.colorMode)
-	cel.image = img
-end
+local ox, oy = cel.position.x, cel.position.y
 
 -- Helper: Find nearest palette index for given RGBA color
 local function findNearestPaletteIndex(r, g, b, a)
@@ -794,7 +830,7 @@ app.transaction(function()
 			local useColor2 = matrixValue < threshold
 			local finalColor = useColor2 and color2 or color1
 
-			img:drawPixel(%d + px, %d + py, finalColor)
+			img:drawPixel(%d + px - ox, %d + py - oy, finalColor)
 		end
 	end
 end)
@@ -811,6 +847,14 @@ print("Dithering applied successfully")`,
 		density,
 		height, width,
 		x, y)
+}
+
+// ditherRegionPrelude returns the Lua prelude shared by the dither scripts: the cel cover
+// helper, and the dither region as ditherX, ditherY, ditherW and ditherH. The dither scripts
+// use it to grow the layer's cel over the region before drawing into its image.
+func ditherRegionPrelude(x, y, width, height int) string {
+	return GenerateCelCoverHelper() +
+		fmt.Sprintf("\nlocal ditherX, ditherY, ditherW, ditherH = %d, %d, %d, %d\n\n", x, y, width, height)
 }
 
 // generateFloydSteinbergLua generates Lua script for Floyd-Steinberg error diffusion dithering.
@@ -851,18 +895,17 @@ if not frame then
 	error("Frame not found: %d")
 end
 
--- Get or create cel
-local cel = layer:cel(frame)
-if not cel then
-	cel = spr:newCel(layer, frame)
+-- Get the cel, grown to cover the dither region (clipped to the canvas).
+-- ditherX/Y/W/H are defined by the prelude from ditherRegionPrelude.
+local rx1, ry1 = math.max(ditherX, 0), math.max(ditherY, 0)
+local rx2 = math.min(ditherX + ditherW - 1, spr.width - 1)
+local ry2 = math.min(ditherY + ditherH - 1, spr.height - 1)
+if rx1 > rx2 or ry1 > ry2 then
+	error("Dither region is outside the canvas")
 end
-
--- Create or get image
+local cel = celCovering(spr, layer, frame, rx1, ry1, rx2, ry2)
 local img = cel.image
-if not img then
-	img = Image(spr.width, spr.height, spr.colorMode)
-	cel.image = img
-end
+local ox, oy = cel.position.x, cel.position.y
 
 -- Helper: Find nearest palette index for given RGBA color
 local function findNearestPaletteIndex(r, g, b, a)
@@ -1028,7 +1071,7 @@ app.transaction(function()
 				end
 			end
 
-			img:drawPixel(%d + px, %d + py, targetColor)
+			img:drawPixel(%d + px - ox, %d + py - oy, targetColor)
 		end
 	end
 end)

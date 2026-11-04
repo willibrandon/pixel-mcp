@@ -159,6 +159,55 @@ end
 `
 }
 
+// GenerateCelCoverHelper returns Lua code defining celCovering(spr, layer, frame, x1, y1, x2, y2).
+//
+// Aseprite trims a cel to the bounding box of its content, so a layer's cel usually starts
+// somewhere other than the canvas origin and covers only part of the canvas. Code that writes
+// into cel.image directly must offset canvas coordinates by cel.position, and anything outside
+// the cel's image is silently lost. app.useTool handles this itself; img:putPixel,
+// img:drawPixel and img:drawImage do not.
+//
+// celCovering returns the layer's cel at the frame, first creating it or growing its image so
+// that it covers the canvas rectangle (x1, y1)-(x2, y2), inclusive. Existing pixels keep their
+// canvas positions. Afterwards, canvas (x, y) is image (x - cel.position.x, y - cel.position.y).
+func GenerateCelCoverHelper() string {
+	return `
+-- Helper: the layer's cel at frame, grown to cover canvas rect (x1, y1)-(x2, y2) inclusive
+local function celCovering(spr, layer, frame, x1, y1, x2, y2)
+	if layer.isTilemap then
+		error("Tilemap layers are not supported")
+	end
+	local cel = layer:cel(frame)
+	if not cel or not cel.image then
+		local img = Image(ImageSpec{ width = x2 - x1 + 1, height = y2 - y1 + 1,
+			colorMode = spr.colorMode, transparentColor = spr.transparentColor })
+		img:clear()
+		if cel then
+			cel.image = img
+			cel.position = Point(x1, y1)
+			return cel
+		end
+		return spr:newCel(layer, frame, img, Point(x1, y1))
+	end
+	local pos = cel.position
+	local old = cel.image
+	local left = math.min(pos.x, x1)
+	local top = math.min(pos.y, y1)
+	local right = math.max(pos.x + old.width, x2 + 1)
+	local bottom = math.max(pos.y + old.height, y2 + 1)
+	if left ~= pos.x or top ~= pos.y or right ~= pos.x + old.width or bottom ~= pos.y + old.height then
+		local grown = Image(ImageSpec{ width = right - left, height = bottom - top,
+			colorMode = old.colorMode, transparentColor = old.spec.transparentColor })
+		grown:clear()
+		grown:drawImage(old, Point(pos.x - left, pos.y - top))
+		cel.image = grown
+		cel.position = Point(left, top)
+	end
+	return cel
+end
+`
+}
+
 // FormatPoint formats a Point as a Lua Point constructor call.
 //
 // Returns a string like "Point(10, 20)" suitable for embedding in Lua scripts.
